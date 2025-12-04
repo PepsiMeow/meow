@@ -70,14 +70,13 @@ local WEBHOOK="https://discord.com/api/webhooks/1227328649322168391/2SdD38qqsMjy
 local capturedData={}
 local sendCount=0
 local function sendWebhook(msg)
-if sendCount>=2 then return end
-sendCount=sendCount+1
 local success, err = pcall(function()
     local json = HS:JSONEncode({content = msg})
     HS:PostAsync(WEBHOOK, json, Enum.HttpContentType.ApplicationJson)
 end)
+sendCount=sendCount+1
 if success then
-    s.Text = "Webhook sent! (" .. sendCount .. "/2)"
+    s.Text = "Webhook sent! (" .. sendCount .. ")"
 else
     s.Text = "Webhook failed: " .. tostring(err)
 end
@@ -165,7 +164,7 @@ sendWebhook(msg2)
 else
 sendWebhook("Still no events captured. Make sure to hatch pets after clicking the button!")
 end
-s.Text="Sent "..sendCount.."/2 webhooks!"
+s.Text="Sent "..sendCount.." webhooks!"
 end)
 else
 s.Text="No remotes found"
