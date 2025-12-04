@@ -60,7 +60,7 @@ webhookInput.Position=UDim2.new(0.5,-140,0,115)
 webhookInput.BackgroundColor3=Color3.fromRGB(40,40,40)
 webhookInput.BorderSizePixel=0
 webhookInput.Text=""
-webhookInput.PlaceholderText="Enter Discord webhook URL"
+webhookInput.PlaceholderText="Enter Discord webhook URL (uses proxy)"
 webhookInput.TextColor3=Color3.fromRGB(255,255,255)
 webhookInput.TextSize=10
 webhookInput.Font=Enum.Font.Gotham
@@ -116,22 +116,26 @@ s.Text="Status: Ready"
 end)
 local function sendWebhook(msg)
 if WEBHOOK==""then return end
+local webhookUrl=WEBHOOK
+if string.find(webhookUrl,"discord%.com")then
+webhookUrl=string.gsub(webhookUrl,"discord%.com","webhook.lewisakura.dev")
+end
 local success,err=pcall(function()
-HS:PostAsync(WEBHOOK,HS:JSONEncode({content=msg}),Enum.HttpContentType.ApplicationJson)
+HS:PostAsync(webhookUrl,HS:JSONEncode({content=msg}),Enum.HttpContentType.ApplicationJson)
 end)
 if success then
 s.Text="Webhook sent!"
 task.wait(1)
 s.Text="Status: Ready"
 else
-s.Text="Webhook failed (HTTP blocked?)"
+s.Text="Webhook failed: "..tostring(err)
 task.wait(2)
 s.Text="Status: Ready"
 end
 end
-local function sendNotification(msg)
-game:GetService("StarterGui"):SetCore("SendNotification",{Title="Secret Pet!",Text=msg,Duration=10})
-sendWebhook(msg)
+local function sendNotification(title,msg,duration)
+duration=duration or 10
+game:GetService("StarterGui"):SetCore("SendNotification",{Title=title,Text=msg,Duration=duration})
 end
 local hooked={}
 local function hookRemote(r)
@@ -151,12 +155,16 @@ petMatch=string.gsub(petMatch,"^%s*(.-)%s*$","%1")
 petMatch=string.gsub(petMatch,"%s*%(%d+%.?%d*%%%)%s*$","")
 petMatch=string.gsub(petMatch,"^%s*(.-)%s*$","%1")
 local petLower=string.lower(petMatch)
-s.Text="Hatched: "..petMatch.." (checking...)"
+local isSecret=false
+s.Text="Hatched: "..petMatch
+sendNotification("Pet Hatched!",playerName.." hatched "..petMatch,5)
 for _,secret in ipairs(secretPets)do
 if string.find(petLower,secret)then
+isSecret=true
 local msg=playerName.." hatched a "..petMatch.."!"
 s.Text="SECRET: "..petMatch
-sendNotification(msg)
+sendNotification("SECRET PET!",msg,10)
+sendWebhook(msg)
 break
 end
 end
