@@ -7,6 +7,20 @@ wait(1)
 local g=Instance.new("ScreenGui")
 g.Name="BubblegumScript"
 g.Parent=p.PlayerGui
+local toggleBtn=Instance.new("TextButton")
+toggleBtn.Name="ToggleButton"
+toggleBtn.Size=UDim2.new(0,40,0,40)
+toggleBtn.Position=UDim2.new(1,-45,0,5)
+toggleBtn.BackgroundColor3=Color3.fromRGB(60,120,200)
+toggleBtn.BorderSizePixel=0
+toggleBtn.Text="GUI"
+toggleBtn.TextColor3=Color3.fromRGB(255,255,255)
+toggleBtn.TextSize=12
+toggleBtn.Font=Enum.Font.GothamBold
+toggleBtn.Parent=g
+local toggleCorner=Instance.new("UICorner")
+toggleCorner.CornerRadius=UDim.new(0,6)
+toggleCorner.Parent=toggleBtn
 local f=Instance.new("Frame")
 f.Size=UDim2.new(0,320,0,280)
 f.Position=UDim2.new(0.5,-160,0.5,-140)
@@ -155,6 +169,16 @@ s.Text="Sent "..sendCount.."/2 webhooks!"
 end)
 else
 s.Text="No remotes found"
+end
+end)
+toggleBtn.Activated:Connect(function()
+f.Visible=not f.Visible
+if f.Visible then
+toggleBtn.Text="GUI"
+toggleBtn.BackgroundColor3=Color3.fromRGB(60,120,200)
+else
+toggleBtn.Text=">>>"
+toggleBtn.BackgroundColor3=Color3.fromRGB(100,100,100)
 end
 end)
 game:GetService("StarterGui"):SetCore("SendNotification",{Title="Loaded",Text="Ready!",Duration=3})
