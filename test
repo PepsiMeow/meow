@@ -90,6 +90,24 @@ hooked[r]=true
 if r:IsA("RemoteEvent")then
 r.OnClientEvent:Connect(function(...)
 local args={...}
+if r.Name=="RemoteEvent"and args[1]=="HatchEgg"and args[2]and type(args[2])=="table"and args[2].Pets then
+local pets=args[2].Pets
+for i,pet in ipairs(pets)do
+if type(pet)=="table"then
+local petName=tostring(pet.Name or pet.name or "Unknown")
+local petLower=string.lower(petName)
+if string.find(petLower,"secret")then
+local msg="🎉 SECRET PET HATCHED! 🎉\nPet: "..petName
+s.Text="SECRET PET: "..petName
+game:GetService("StarterGui"):SetCore("SendNotification",{Title="SECRET PET!",Text=petName,Duration=10})
+print("=== SECRET PET ===")
+for k,v in pairs(pet)do
+print(k..": "..tostring(v))
+end
+end
+end
+end
+end
 local dataStr=""
 for i=1,#args do
 local arg=args[i]
@@ -98,11 +116,18 @@ dataStr=dataStr.."Arg"..i.."(s): "..arg.."\n"
 elseif type(arg)=="table"then
 dataStr=dataStr.."Arg"..i.."(t):\n"
 for k,v in pairs(arg)do
-dataStr=dataStr.."  "..tostring(k)..": "..tostring(v).."\n"
-if type(v)=="table"then
-for k2,v2 in pairs(v)do
-dataStr=dataStr.."    "..tostring(k2)..": "..tostring(v2).."\n"
+if k=="Pets"and type(v)=="table"then
+dataStr=dataStr.."  "..k..":\n"
+for j,pet in ipairs(v)do
+if type(pet)=="table"then
+dataStr=dataStr.."    Pet "..j..":\n"
+for pk,pv in pairs(pet)do
+dataStr=dataStr.."      "..tostring(pk)..": "..tostring(pv).."\n"
 end
+end
+end
+else
+dataStr=dataStr.."  "..tostring(k)..": "..tostring(v).."\n"
 end
 end
 else
