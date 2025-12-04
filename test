@@ -1,0 +1,147 @@
+local P=game:GetService("Players")
+local RS=game:GetService("ReplicatedStorage")
+local HS=game:GetService("HttpService")
+local p=P.LocalPlayer
+pcall(function()HS.HttpEnabled=true end)
+wait(1)
+local g=Instance.new("ScreenGui")
+g.Name="BubblegumScript"
+g.Parent=p.PlayerGui
+local f=Instance.new("Frame")
+f.Size=UDim2.new(0,320,0,280)
+f.Position=UDim2.new(0.5,-160,0.5,-140)
+f.BackgroundColor3=Color3.fromRGB(30,30,30)
+f.BorderSizePixel=0
+f.Parent=g
+local t=Instance.new("TextLabel")
+t.Size=UDim2.new(1,0,0,40)
+t.BackgroundColor3=Color3.fromRGB(40,40,40)
+t.Text="Bubblegum Script"
+t.TextColor3=Color3.fromRGB(255,255,255)
+t.TextSize=18
+t.Font=Enum.Font.GothamBold
+t.Parent=f
+local b1=Instance.new("TextButton")
+b1.Size=UDim2.new(0,280,0,35)
+b1.Position=UDim2.new(0.5,-140,0,50)
+b1.BackgroundColor3=Color3.fromRGB(60,60,60)
+b1.Text="Auto Hatch: OFF"
+b1.TextColor3=Color3.fromRGB(255,255,255)
+b1.TextSize=14
+b1.Font=Enum.Font.Gotham
+b1.Parent=f
+local b2=Instance.new("TextButton")
+b2.Size=UDim2.new(0,280,0,35)
+b2.Position=UDim2.new(0.5,-140,0,95)
+b2.BackgroundColor3=Color3.fromRGB(60,120,200)
+b2.Text="Find Remotes"
+b2.TextColor3=Color3.fromRGB(255,255,255)
+b2.TextSize=14
+b2.Font=Enum.Font.Gotham
+b2.Parent=f
+local s=Instance.new("TextLabel")
+s.Size=UDim2.new(0,280,0,120)
+s.Position=UDim2.new(0.5,-140,0,140)
+s.BackgroundTransparency=1
+s.Text="Status: Ready"
+s.TextColor3=Color3.fromRGB(200,200,200)
+s.TextSize=10
+s.Font=Enum.Font.Gotham
+s.TextWrapped=true
+s.Parent=f
+local en=false
+local remotes={}
+local hooked={}
+local WEBHOOK="https://discord.com/api/webhooks/1227328649322168391/2SdD38qqsMjyktorFtdOLO7p9yN_RK_VdVocfiuT-SxRVKX1t5dMEw3STYxfSWCz7IeQ"
+local capturedData={}
+local sendCount=0
+local function sendWebhook(msg)
+if sendCount>=2 then return end
+sendCount=sendCount+1
+pcall(function()HS:PostAsync(WEBHOOK,HS:JSONEncode({content=msg}),Enum.HttpContentType.ApplicationJson)end)
+end
+local function hookRemote(r)
+if hooked[r]then return end
+hooked[r]=true
+if r:IsA("RemoteEvent")then
+r.OnClientEvent:Connect(function(...)
+local args={...}
+local dataStr=""
+for i=1,#args do
+local arg=args[i]
+if type(arg)=="string"then
+dataStr=dataStr.."Arg"..i.."(s): "..arg.."\n"
+elseif type(arg)=="table"then
+dataStr=dataStr.."Arg"..i.."(t):\n"
+for k,v in pairs(arg)do
+dataStr=dataStr.."  "..tostring(k)..": "..tostring(v).."\n"
+if type(v)=="table"then
+for k2,v2 in pairs(v)do
+dataStr=dataStr.."    "..tostring(k2)..": "..tostring(v2).."\n"
+end
+end
+end
+else
+dataStr=dataStr.."Arg"..i.."("..type(arg).."): "..tostring(arg).."\n"
+end
+end
+table.insert(capturedData,"=== "..r.Name.." ===\n"..dataStr.."\n")
+s.Text="Captured: "..r.Name
+end)
+end
+end
+b1.Activated:Connect(function()
+en=not en
+if en then
+b1.Text="Auto Hatch: ON"
+b1.BackgroundColor3=Color3.fromRGB(50,200,50)
+s.Text="Auto Hatch: Active"
+spawn(function()
+local VIM=game:GetService("VirtualInputManager")
+while en do
+VIM:SendKeyEvent(true,Enum.KeyCode.E,false,game)
+task.wait(0.05)
+VIM:SendKeyEvent(false,Enum.KeyCode.E,false,game)
+task.wait(0.2)
+end
+end)
+else
+b1.Text="Auto Hatch: OFF"
+b1.BackgroundColor3=Color3.fromRGB(60,60,60)
+s.Text="Auto Hatch: Stopped"
+end
+end)
+b2.Activated:Connect(function()
+s.Text="Searching..."
+remotes={}
+capturedData={}
+sendCount=0
+for _,v in pairs(RS:GetDescendants())do
+if v:IsA("RemoteEvent")or v:IsA("RemoteFunction")then
+table.insert(remotes,v)
+hookRemote(v)
+end
+end
+if #remotes>0 then
+s.Text="Found "..#remotes.." - Hooking!\nWill send in 10s"
+spawn(function()
+task.wait(10)
+if #capturedData>0 then
+local msg="Captured Data:\n\n"..table.concat(capturedData,"\n")
+if #msg>2000 then msg=string.sub(msg,1,2000).."..."end
+sendWebhook(msg)
+s.Text="Sent "..sendCount.." webhooks!"
+task.wait(10)
+if #capturedData>0 then
+local msg2="Second capture:\n\n"..table.concat(capturedData,"\n")
+if #msg2>2000 then msg2=string.sub(msg2,1,2000).."..."end
+sendWebhook(msg2)
+s.Text="Sent both webhooks!"
+end
+end
+end)
+else
+s.Text="No remotes found"
+end
+end)
+game:GetService("StarterGui"):SetCore("SendNotification",{Title="Loaded",Text="Ready!",Duration=3})
