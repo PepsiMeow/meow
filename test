@@ -168,19 +168,25 @@ dataWindow=Instance.new("ScreenGui")
 dataWindow.Name="DataWindow"
 dataWindow.Parent=p.PlayerGui
 local dw=Instance.new("Frame")
-dw.Size=UDim2.new(0,600,0,500)
-dw.Position=UDim2.new(0.5,-300,0.5,-250)
+dw.Size=UDim2.new(0,500,0,400)
+dw.Position=UDim2.new(0.5,-250,0.5,-200)
 dw.BackgroundColor3=Color3.fromRGB(20,20,20)
 dw.BorderSizePixel=0
 dw.Parent=dataWindow
+local corner=Instance.new("UICorner")
+corner.CornerRadius=UDim.new(0,8)
+corner.Parent=dw
 local dt=Instance.new("TextLabel")
 dt.Size=UDim2.new(1,0,0,40)
 dt.BackgroundColor3=Color3.fromRGB(40,40,40)
 dt.Text="Captured Data ("..#capturedData.." events)"
 dt.TextColor3=Color3.fromRGB(255,255,255)
-dt.TextSize=18
+dt.TextSize=16
 dt.Font=Enum.Font.GothamBold
 dt.Parent=dw
+local titleCorner=Instance.new("UICorner")
+titleCorner.CornerRadius=UDim.new(0,8)
+titleCorner.Parent=dt
 local scroll=Instance.new("ScrollingFrame")
 scroll.Size=UDim2.new(1,-20,1,-100)
 scroll.Position=UDim2.new(0,10,0,50)
@@ -194,22 +200,41 @@ txt.Position=UDim2.new(0,5,0,0)
 txt.BackgroundTransparency=1
 txt.Text=#capturedData>0 and table.concat(capturedData,"\n") or "No data captured yet. Click 'Find Remotes' and hatch pets!"
 txt.TextColor3=Color3.fromRGB(255,255,255)
-txt.TextSize=11
+txt.TextSize=10
 txt.Font=Enum.Font.Code
 txt.TextXAlignment=Enum.TextXAlignment.Left
 txt.TextYAlignment=Enum.TextYAlignment.Top
 txt.TextWrapped=true
 txt.Parent=scroll
 scroll.CanvasSize=UDim2.new(0,0,0,txt.TextBounds.Y+10)
+local copyBtn=Instance.new("TextButton")
+copyBtn.Size=UDim2.new(0,230,0,35)
+copyBtn.Position=UDim2.new(0,10,1,-45)
+copyBtn.BackgroundColor3=Color3.fromRGB(60,120,200)
+copyBtn.Text="Copy Data"
+copyBtn.TextColor3=Color3.fromRGB(255,255,255)
+copyBtn.TextSize=14
+copyBtn.Font=Enum.Font.Gotham
+copyBtn.Parent=dw
+copyBtn.Activated:Connect(function()
+local dataText=#capturedData>0 and table.concat(capturedData,"\n") or "No data"
+setclipboard(dataText)
+s.Text="Data copied to clipboard!"
+task.wait(2)
+s.Text="Status: Ready"
+end)
 local closeBtn=Instance.new("TextButton")
-closeBtn.Size=UDim2.new(0,580,0,40)
-closeBtn.Position=UDim2.new(0.5,-290,1,-50)
+closeBtn.Size=UDim2.new(0,230,0,35)
+closeBtn.Position=UDim2.new(1,-240,1,-45)
 closeBtn.BackgroundColor3=Color3.fromRGB(200,50,50)
 closeBtn.Text="Close"
 closeBtn.TextColor3=Color3.fromRGB(255,255,255)
 closeBtn.TextSize=14
 closeBtn.Font=Enum.Font.Gotham
 closeBtn.Parent=dw
-closeBtn.Activated:Connect(function()dataWindow:Destroy()end)
+closeBtn.Activated:Connect(function()
+dataWindow:Destroy()
+dataWindow=nil
+end)
 end)
 game:GetService("StarterGui"):SetCore("SendNotification",{Title="Loaded",Text="Ready!",Duration=3})
