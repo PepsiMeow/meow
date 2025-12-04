@@ -107,17 +107,27 @@ table.insert(secretPets,string.lower(string.gsub(pet,"^%s*(.-)%s*$","%1")))
 end
 end
 end
+updateSecretPets()
 secretInput.FocusLost:Connect(function()
 updateSecretPets()
-end)
-local function sendWebhook(msg)
-if WEBHOOK==""then return end
-pcall(function()
-HS:PostAsync(WEBHOOK,HS:JSONEncode({content=msg}),Enum.HttpContentType.ApplicationJson)
-s.Text="Webhook sent!"
+s.Text="Secret pets updated!"
 task.wait(1)
 s.Text="Status: Ready"
 end)
+local function sendWebhook(msg)
+if WEBHOOK==""then return end
+local success,err=pcall(function()
+HS:PostAsync(WEBHOOK,HS:JSONEncode({content=msg}),Enum.HttpContentType.ApplicationJson)
+end)
+if success then
+s.Text="Webhook sent!"
+task.wait(1)
+s.Text="Status: Ready"
+else
+s.Text="Webhook failed (HTTP blocked?)"
+task.wait(2)
+s.Text="Status: Ready"
+end
 end
 local function sendNotification(msg)
 game:GetService("StarterGui"):SetCore("SendNotification",{Title="Secret Pet!",Text=msg,Duration=10})
@@ -138,7 +148,10 @@ if nameMatch and nameMatch==playerName then
 local petMatch=string.match(message,"just hatched a <font color=\"#[^\"]+\">([^<]+)</font>")
 if petMatch then
 petMatch=string.gsub(petMatch,"^%s*(.-)%s*$","%1")
+petMatch=string.gsub(petMatch,"%s*%(%d+%.?%d*%%%)%s*$","")
+petMatch=string.gsub(petMatch,"^%s*(.-)%s*$","%1")
 local petLower=string.lower(petMatch)
+s.Text="Hatched: "..petMatch.." (checking...)"
 for _,secret in ipairs(secretPets)do
 if string.find(petLower,secret)then
 local msg=playerName.." hatched a "..petMatch.."!"
@@ -155,9 +168,19 @@ end
 end
 spawn(function()
 wait(2)
+local count=0
 for _,v in pairs(RS:GetDescendants())do
-if v:IsA("RemoteEvent")then hookRemote(v)end
+if v:IsA("RemoteEvent")then 
+hookRemote(v)
+count=count+1
 end
+end
+s.Text="Hooked "..count.." RemoteEvents - Ready!"
+task.wait(2)
+s.Text="Status: Ready"
+end)
+RS.ChildAdded:Connect(function(child)
+if child:IsA("RemoteEvent")then hookRemote(child)end
 end)
 b1.Activated:Connect(function()
 en=not en
