@@ -58,7 +58,15 @@ local sendCount=0
 local function sendWebhook(msg)
 if sendCount>=2 then return end
 sendCount=sendCount+1
-pcall(function()HS:PostAsync(WEBHOOK,HS:JSONEncode({content=msg}),Enum.HttpContentType.ApplicationJson)end)
+local success, err = pcall(function()
+    local json = HS:JSONEncode({content = msg})
+    HS:PostAsync(WEBHOOK, json, Enum.HttpContentType.ApplicationJson)
+end)
+if success then
+    s.Text = "Webhook sent! (" .. sendCount .. "/2)"
+else
+    s.Text = "Webhook failed: " .. tostring(err)
+end
 end
 local function hookRemote(r)
 if hooked[r]then return end
@@ -123,22 +131,27 @@ hookRemote(v)
 end
 end
 if #remotes>0 then
-s.Text="Found "..#remotes.." - Hooking!\nWill send in 10s"
+s.Text="Found "..#remotes.." - Hooking!\nTest webhook in 3s"
 spawn(function()
-task.wait(10)
+task.wait(3)
+sendWebhook("Test message - Script is working! Found "..#remotes.." remotes.")
+task.wait(7)
 if #capturedData>0 then
-local msg="Captured Data:\n\n"..table.concat(capturedData,"\n")
-if #msg>2000 then msg=string.sub(msg,1,2000).."..."end
+local msg="=== FIRST CAPTURE ===\n\n"..table.concat(capturedData,"\n")
+if #msg>1900 then msg=string.sub(msg,1,1900).."\n...truncated..."end
 sendWebhook(msg)
-s.Text="Sent "..sendCount.." webhooks!"
+else
+sendWebhook("No events captured yet after 10 seconds. Hatch some pets!")
+end
 task.wait(10)
 if #capturedData>0 then
-local msg2="Second capture:\n\n"..table.concat(capturedData,"\n")
-if #msg2>2000 then msg2=string.sub(msg2,1,2000).."..."end
+local msg2="=== SECOND CAPTURE ===\n\n"..table.concat(capturedData,"\n")
+if #msg2>1900 then msg2=string.sub(msg2,1,1900).."\n...truncated..."end
 sendWebhook(msg2)
-s.Text="Sent both webhooks!"
+else
+sendWebhook("Still no events captured. Make sure to hatch pets after clicking the button!")
 end
-end
+s.Text="Sent "..sendCount.."/2 webhooks!"
 end)
 else
 s.Text="No remotes found"
