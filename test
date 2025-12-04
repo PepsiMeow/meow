@@ -24,6 +24,7 @@ toggleCorner.Parent=toggleBtn
 local f=Instance.new("Frame")
 f.Size=UDim2.new(0,320,0,280)
 f.Position=UDim2.new(0.5,-160,0.5,-140)
+local dataWindow=nil
 f.BackgroundColor3=Color3.fromRGB(30,30,30)
 f.BorderSizePixel=0
 f.Parent=g
@@ -53,9 +54,18 @@ b2.TextColor3=Color3.fromRGB(255,255,255)
 b2.TextSize=14
 b2.Font=Enum.Font.Gotham
 b2.Parent=f
+local b3=Instance.new("TextButton")
+b3.Size=UDim2.new(0,280,0,35)
+b3.Position=UDim2.new(0.5,-140,0,140)
+b3.BackgroundColor3=Color3.fromRGB(120,60,200)
+b3.Text="Show Captured Data"
+b3.TextColor3=Color3.fromRGB(255,255,255)
+b3.TextSize=14
+b3.Font=Enum.Font.Gotham
+b3.Parent=f
 local s=Instance.new("TextLabel")
-s.Size=UDim2.new(0,280,0,120)
-s.Position=UDim2.new(0.5,-140,0,140)
+s.Size=UDim2.new(0,280,0,80)
+s.Position=UDim2.new(0.5,-140,0,185)
 s.BackgroundTransparency=1
 s.Text="Status: Ready"
 s.TextColor3=Color3.fromRGB(200,200,200)
@@ -71,29 +81,8 @@ local capturedData={}
 local sendCount=0
 local function sendWebhook(msg)
 sendCount=sendCount+1
-local success, err = pcall(function()
-    if not HS.HttpEnabled then
-        error("HttpService not enabled")
-    end
-    local data = {
-        content = msg
-    }
-    local json = HS:JSONEncode(data)
-    local response = HS:RequestAsync({
-        Url = WEBHOOK,
-        Method = "POST",
-        Headers = {
-            ["Content-Type"] = "application/json"
-        },
-        Body = json
-    })
-end)
-if success then
-    s.Text = "Webhook sent! (" .. sendCount .. ")"
-else
-    s.Text = "Webhook failed: " .. tostring(err)
-    print("Webhook error:", err)
-end
+s.Text="Webhook disabled (Roblox blocks HTTP)"
+print("WEBHOOK DATA ("..sendCount.."):",msg)
 end
 local function hookRemote(r)
 if hooked[r]then return end
@@ -158,28 +147,7 @@ hookRemote(v)
 end
 end
 if #remotes>0 then
-s.Text="Found "..#remotes.." - Hooking!\nTest webhook in 3s"
-spawn(function()
-task.wait(3)
-sendWebhook("Test message - Script is working! Found "..#remotes.." remotes.")
-task.wait(7)
-if #capturedData>0 then
-local msg="=== FIRST CAPTURE ===\n\n"..table.concat(capturedData,"\n")
-if #msg>1900 then msg=string.sub(msg,1,1900).."\n...truncated..."end
-sendWebhook(msg)
-else
-sendWebhook("No events captured yet after 10 seconds. Hatch some pets!")
-end
-task.wait(10)
-if #capturedData>0 then
-local msg2="=== SECOND CAPTURE ===\n\n"..table.concat(capturedData,"\n")
-if #msg2>1900 then msg2=string.sub(msg2,1,1900).."\n...truncated..."end
-sendWebhook(msg2)
-else
-sendWebhook("Still no events captured. Make sure to hatch pets after clicking the button!")
-end
-s.Text="Sent "..sendCount.." webhooks!"
-end)
+s.Text="Found "..#remotes.." - Hooking!\nHatch pets, then click 'Show Captured Data'"
 else
 s.Text="No remotes found"
 end
@@ -193,5 +161,55 @@ else
 toggleBtn.Text=">>>"
 toggleBtn.BackgroundColor3=Color3.fromRGB(100,100,100)
 end
+end)
+b3.Activated:Connect(function()
+if dataWindow then dataWindow:Destroy()end
+dataWindow=Instance.new("ScreenGui")
+dataWindow.Name="DataWindow"
+dataWindow.Parent=p.PlayerGui
+local dw=Instance.new("Frame")
+dw.Size=UDim2.new(0,600,0,500)
+dw.Position=UDim2.new(0.5,-300,0.5,-250)
+dw.BackgroundColor3=Color3.fromRGB(20,20,20)
+dw.BorderSizePixel=0
+dw.Parent=dataWindow
+local dt=Instance.new("TextLabel")
+dt.Size=UDim2.new(1,0,0,40)
+dt.BackgroundColor3=Color3.fromRGB(40,40,40)
+dt.Text="Captured Data ("..#capturedData.." events)"
+dt.TextColor3=Color3.fromRGB(255,255,255)
+dt.TextSize=18
+dt.Font=Enum.Font.GothamBold
+dt.Parent=dw
+local scroll=Instance.new("ScrollingFrame")
+scroll.Size=UDim2.new(1,-20,1,-100)
+scroll.Position=UDim2.new(0,10,0,50)
+scroll.BackgroundColor3=Color3.fromRGB(15,15,15)
+scroll.BorderSizePixel=0
+scroll.ScrollBarThickness=8
+scroll.Parent=dw
+local txt=Instance.new("TextLabel")
+txt.Size=UDim2.new(1,-10,1,0)
+txt.Position=UDim2.new(0,5,0,0)
+txt.BackgroundTransparency=1
+txt.Text=#capturedData>0 and table.concat(capturedData,"\n") or "No data captured yet. Click 'Find Remotes' and hatch pets!"
+txt.TextColor3=Color3.fromRGB(255,255,255)
+txt.TextSize=11
+txt.Font=Enum.Font.Code
+txt.TextXAlignment=Enum.TextXAlignment.Left
+txt.TextYAlignment=Enum.TextYAlignment.Top
+txt.TextWrapped=true
+txt.Parent=scroll
+scroll.CanvasSize=UDim2.new(0,0,0,txt.TextBounds.Y+10)
+local closeBtn=Instance.new("TextButton")
+closeBtn.Size=UDim2.new(0,580,0,40)
+closeBtn.Position=UDim2.new(0.5,-290,1,-50)
+closeBtn.BackgroundColor3=Color3.fromRGB(200,50,50)
+closeBtn.Text="Close"
+closeBtn.TextColor3=Color3.fromRGB(255,255,255)
+closeBtn.TextSize=14
+closeBtn.Font=Enum.Font.Gotham
+closeBtn.Parent=dw
+closeBtn.Activated:Connect(function()dataWindow:Destroy()end)
 end)
 game:GetService("StarterGui"):SetCore("SendNotification",{Title="Loaded",Text="Ready!",Duration=3})
