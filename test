@@ -24,7 +24,6 @@ toggleCorner.Parent=toggleBtn
 local f=Instance.new("Frame")
 f.Size=UDim2.new(0,320,0,280)
 f.Position=UDim2.new(0.5,-160,0.5,-140)
-local dataWindow=nil
 f.BackgroundColor3=Color3.fromRGB(30,30,30)
 f.BorderSizePixel=0
 f.Parent=g
@@ -45,27 +44,50 @@ b1.TextColor3=Color3.fromRGB(255,255,255)
 b1.TextSize=14
 b1.Font=Enum.Font.Gotham
 b1.Parent=f
-local b2=Instance.new("TextButton")
-b2.Size=UDim2.new(0,280,0,35)
-b2.Position=UDim2.new(0.5,-140,0,95)
-b2.BackgroundColor3=Color3.fromRGB(60,120,200)
-b2.Text="Find Remotes"
-b2.TextColor3=Color3.fromRGB(255,255,255)
-b2.TextSize=14
-b2.Font=Enum.Font.Gotham
-b2.Parent=f
-local b3=Instance.new("TextButton")
-b3.Size=UDim2.new(0,280,0,35)
-b3.Position=UDim2.new(0.5,-140,0,140)
-b3.BackgroundColor3=Color3.fromRGB(120,60,200)
-b3.Text="Show Captured Data"
-b3.TextColor3=Color3.fromRGB(255,255,255)
-b3.TextSize=14
-b3.Font=Enum.Font.Gotham
-b3.Parent=f
+local webhookLabel=Instance.new("TextLabel")
+webhookLabel.Size=UDim2.new(0,280,0,20)
+webhookLabel.Position=UDim2.new(0.5,-140,0,95)
+webhookLabel.BackgroundTransparency=1
+webhookLabel.Text="Webhook URL:"
+webhookLabel.TextColor3=Color3.fromRGB(200,200,200)
+webhookLabel.TextSize=10
+webhookLabel.Font=Enum.Font.Gotham
+webhookLabel.TextXAlignment=Enum.TextXAlignment.Left
+webhookLabel.Parent=f
+local webhookInput=Instance.new("TextBox")
+webhookInput.Size=UDim2.new(0,280,0,30)
+webhookInput.Position=UDim2.new(0.5,-140,0,115)
+webhookInput.BackgroundColor3=Color3.fromRGB(40,40,40)
+webhookInput.BorderSizePixel=0
+webhookInput.Text=""
+webhookInput.PlaceholderText="Enter Discord webhook URL"
+webhookInput.TextColor3=Color3.fromRGB(255,255,255)
+webhookInput.TextSize=10
+webhookInput.Font=Enum.Font.Gotham
+webhookInput.Parent=f
+local secretLabel=Instance.new("TextLabel")
+secretLabel.Size=UDim2.new(0,280,0,20)
+secretLabel.Position=UDim2.new(0.5,-140,0,135)
+secretLabel.BackgroundTransparency=1
+secretLabel.Text="Secret Pets (comma separated):"
+secretLabel.TextColor3=Color3.fromRGB(200,200,200)
+secretLabel.TextSize=10
+secretLabel.Font=Enum.Font.Gotham
+secretLabel.TextXAlignment=Enum.TextXAlignment.Left
+secretLabel.Parent=f
+local secretInput=Instance.new("TextBox")
+secretInput.Size=UDim2.new(0,280,0,30)
+secretInput.Position=UDim2.new(0.5,-140,0,175)
+secretInput.BackgroundColor3=Color3.fromRGB(40,40,40)
+secretInput.BorderSizePixel=0
+secretInput.Text="snowball"
+secretInput.TextColor3=Color3.fromRGB(255,255,255)
+secretInput.TextSize=10
+secretInput.Font=Enum.Font.Gotham
+secretInput.Parent=f
 local s=Instance.new("TextLabel")
-s.Size=UDim2.new(0,280,0,80)
-s.Position=UDim2.new(0.5,-140,0,185)
+s.Size=UDim2.new(0,280,0,50)
+s.Position=UDim2.new(0.5,-140,0,215)
 s.BackgroundTransparency=1
 s.Text="Status: Ready"
 s.TextColor3=Color3.fromRGB(200,200,200)
@@ -74,71 +96,69 @@ s.Font=Enum.Font.Gotham
 s.TextWrapped=true
 s.Parent=f
 local en=false
-local remotes={}
-local hooked={}
-local WEBHOOK="https://discord.com/api/webhooks/1227328649322168391/2SdD38qqsMjyktorFtdOLO7p9yN_RK_VdVocfiuT-SxRVKX1t5dMEw3STYxfSWCz7IeQ"
-local capturedData={}
-local sendCount=0
-local function sendWebhook(msg)
-sendCount=sendCount+1
-s.Text="Webhook disabled (Roblox blocks HTTP)"
-print("WEBHOOK DATA ("..sendCount.."):",msg)
+local WEBHOOK=""
+local secretPets={"snowball"}
+local function updateSecretPets()
+local text=secretInput.Text
+if text and text~=""then
+secretPets={}
+for pet in string.gmatch(text,"([^,]+)")do
+table.insert(secretPets,string.lower(string.gsub(pet,"^%s*(.-)%s*$","%1")))
 end
+end
+end
+secretInput.FocusLost:Connect(function()
+updateSecretPets()
+end)
+local function sendWebhook(msg)
+if WEBHOOK==""then return end
+pcall(function()
+HS:PostAsync(WEBHOOK,HS:JSONEncode({content=msg}),Enum.HttpContentType.ApplicationJson)
+s.Text="Webhook sent!"
+task.wait(1)
+s.Text="Status: Ready"
+end)
+end
+local function sendNotification(msg)
+game:GetService("StarterGui"):SetCore("SendNotification",{Title="Secret Pet!",Text=msg,Duration=10})
+sendWebhook(msg)
+end
+local hooked={}
 local function hookRemote(r)
 if hooked[r]then return end
 hooked[r]=true
 if r:IsA("RemoteEvent")then
 r.OnClientEvent:Connect(function(...)
 local args={...}
-if r.Name=="RemoteEvent"and args[1]=="HatchEgg"and args[2]and type(args[2])=="table"and args[2].Pets then
-local pets=args[2].Pets
-for i,pet in ipairs(pets)do
-if type(pet)=="table"then
-local petName=tostring(pet.Name or pet.name or "Unknown")
-local petLower=string.lower(petName)
-if string.find(petLower,"secret")then
-local msg="🎉 SECRET PET HATCHED! 🎉\nPet: "..petName
-s.Text="SECRET PET: "..petName
-game:GetService("StarterGui"):SetCore("SendNotification",{Title="SECRET PET!",Text=petName,Duration=10})
-print("=== SECRET PET ===")
-for k,v in pairs(pet)do
-print(k..": "..tostring(v))
+if args[2]=="ServerHatch"and type(args[1])=="string"then
+local message=args[1]
+local playerName=p.Name
+local nameMatch=string.match(message,"<font color=\"#[^\"]+\">([^<]+)</font> just hatched")
+if nameMatch and nameMatch==playerName then
+local petMatch=string.match(message,"just hatched a <font color=\"#[^\"]+\">([^<]+)</font>")
+if petMatch then
+petMatch=string.gsub(petMatch,"^%s*(.-)%s*$","%1")
+local petLower=string.lower(petMatch)
+for _,secret in ipairs(secretPets)do
+if string.find(petLower,secret)then
+local msg=playerName.." hatched a "..petMatch.."!"
+s.Text="SECRET: "..petMatch
+sendNotification(msg)
+break
 end
 end
 end
 end
 end
-local dataStr=""
-for i=1,#args do
-local arg=args[i]
-if type(arg)=="string"then
-dataStr=dataStr.."Arg"..i.."(s): "..arg.."\n"
-elseif type(arg)=="table"then
-dataStr=dataStr.."Arg"..i.."(t):\n"
-for k,v in pairs(arg)do
-if k=="Pets"and type(v)=="table"then
-dataStr=dataStr.."  "..k..":\n"
-for j,pet in ipairs(v)do
-if type(pet)=="table"then
-dataStr=dataStr.."    Pet "..j..":\n"
-for pk,pv in pairs(pet)do
-dataStr=dataStr.."      "..tostring(pk)..": "..tostring(pv).."\n"
-end
-end
-end
-else
-dataStr=dataStr.."  "..tostring(k)..": "..tostring(v).."\n"
-end
-end
-else
-dataStr=dataStr.."Arg"..i.."("..type(arg).."): "..tostring(arg).."\n"
-end
-end
-table.insert(capturedData,"=== "..r.Name.." ===\n"..dataStr.."\n")
-s.Text="Captured: "..r.Name
 end)
 end
 end
+spawn(function()
+wait(2)
+for _,v in pairs(RS:GetDescendants())do
+if v:IsA("RemoteEvent")then hookRemote(v)end
+end
+end)
 b1.Activated:Connect(function()
 en=not en
 if en then
@@ -160,21 +180,12 @@ b1.BackgroundColor3=Color3.fromRGB(60,60,60)
 s.Text="Auto Hatch: Stopped"
 end
 end)
-b2.Activated:Connect(function()
-s.Text="Searching..."
-remotes={}
-capturedData={}
-sendCount=0
-for _,v in pairs(RS:GetDescendants())do
-if v:IsA("RemoteEvent")or v:IsA("RemoteFunction")then
-table.insert(remotes,v)
-hookRemote(v)
-end
-end
-if #remotes>0 then
-s.Text="Found "..#remotes.." - Hooking!\nHatch pets, then click 'Show Captured Data'"
-else
-s.Text="No remotes found"
+webhookInput.FocusLost:Connect(function()
+WEBHOOK=webhookInput.Text
+if WEBHOOK~=""then
+s.Text="Webhook URL saved!"
+task.wait(1)
+s.Text="Status: Ready"
 end
 end)
 toggleBtn.Activated:Connect(function()
@@ -186,96 +197,5 @@ else
 toggleBtn.Text=">>>"
 toggleBtn.BackgroundColor3=Color3.fromRGB(100,100,100)
 end
-end)
-b3.Activated:Connect(function()
-if dataWindow then dataWindow:Destroy()dataWindow=nil end
-dataWindow=Instance.new("ScreenGui")
-dataWindow.Name="DataWindow"
-dataWindow.Parent=p.PlayerGui
-local dw=Instance.new("Frame")
-dw.Size=UDim2.new(0,450,0,350)
-dw.Position=UDim2.new(0.5,-225,0.5,-175)
-dw.BackgroundColor3=Color3.fromRGB(20,20,20)
-dw.BorderSizePixel=0
-dw.Parent=dataWindow
-local corner=Instance.new("UICorner")
-corner.CornerRadius=UDim.new(0,8)
-corner.Parent=dw
-local dt=Instance.new("TextLabel")
-dt.Size=UDim2.new(1,0,0,35)
-dt.Position=UDim2.new(0,0,0,0)
-dt.BackgroundColor3=Color3.fromRGB(40,40,40)
-dt.Text="Captured Data ("..#capturedData.." events)"
-dt.TextColor3=Color3.fromRGB(255,255,255)
-dt.TextSize=14
-dt.Font=Enum.Font.GothamBold
-dt.Parent=dw
-local scroll=Instance.new("ScrollingFrame")
-scroll.Size=UDim2.new(1,-20,1,-95)
-scroll.Position=UDim2.new(0,10,0,40)
-scroll.BackgroundColor3=Color3.fromRGB(15,15,15)
-scroll.BorderSizePixel=0
-scroll.ScrollBarThickness=10
-scroll.Parent=dw
-local txt=Instance.new("TextLabel")
-txt.Size=UDim2.new(1,-20,0,0)
-txt.Position=UDim2.new(0,5,0,5)
-txt.BackgroundTransparency=1
-local dataText=#capturedData>0 and table.concat(capturedData,"\n") or "No data captured yet. Click 'Find Remotes' and hatch pets!"
-txt.Text=dataText
-txt.TextColor3=Color3.fromRGB(255,255,255)
-txt.TextSize=9
-txt.Font=Enum.Font.Code
-txt.TextXAlignment=Enum.TextXAlignment.Left
-txt.TextYAlignment=Enum.TextYAlignment.Top
-txt.TextWrapped=false
-txt.Parent=scroll
-spawn(function()
-task.wait(0.2)
-local lineCount=0
-for _ in string.gmatch(dataText,"\n")do lineCount=lineCount+1 end
-local estimatedHeight=(lineCount+1)*12+20
-scroll.CanvasSize=UDim2.new(0,0,0,math.max(estimatedHeight,txt.TextBounds.Y+50,scroll.AbsoluteSize.Y))
-end)
-txt:GetPropertyChangedSignal("TextBounds"):Connect(function()
-scroll.CanvasSize=UDim2.new(0,0,0,math.max(txt.TextBounds.Y+50,scroll.AbsoluteSize.Y))
-end)
-local copyBtn=Instance.new("TextButton")
-copyBtn.Size=UDim2.new(0,200,0,40)
-copyBtn.Position=UDim2.new(0,10,1,-50)
-copyBtn.BackgroundColor3=Color3.fromRGB(60,120,200)
-copyBtn.BorderSizePixel=0
-copyBtn.Text="Copy Data"
-copyBtn.TextColor3=Color3.fromRGB(255,255,255)
-copyBtn.TextSize=13
-copyBtn.Font=Enum.Font.Gotham
-copyBtn.Parent=dw
-local copyCorner=Instance.new("UICorner")
-copyCorner.CornerRadius=UDim.new(0,6)
-copyCorner.Parent=copyBtn
-copyBtn.Activated:Connect(function()
-local dataText=#capturedData>0 and table.concat(capturedData,"\n") or "No data"
-pcall(function()setclipboard(dataText)end)
-s.Text="Data copied! (Check clipboard)"
-task.wait(2)
-if dataWindow then s.Text="Data window open"end
-end)
-local closeBtn=Instance.new("TextButton")
-closeBtn.Size=UDim2.new(0,200,0,40)
-closeBtn.Position=UDim2.new(1,-210,1,-50)
-closeBtn.BackgroundColor3=Color3.fromRGB(200,50,50)
-closeBtn.BorderSizePixel=0
-closeBtn.Text="Close"
-closeBtn.TextColor3=Color3.fromRGB(255,255,255)
-closeBtn.TextSize=13
-closeBtn.Font=Enum.Font.Gotham
-closeBtn.Parent=dw
-local closeCorner=Instance.new("UICorner")
-closeCorner.CornerRadius=UDim.new(0,6)
-closeCorner.Parent=closeBtn
-closeBtn.Activated:Connect(function()
-dataWindow:Destroy()
-dataWindow=nil
-end)
 end)
 game:GetService("StarterGui"):SetCore("SendNotification",{Title="Loaded",Text="Ready!",Duration=3})
