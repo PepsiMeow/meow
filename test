@@ -150,8 +150,8 @@ local toggleCorner=Instance.new("UICorner")
 toggleCorner.CornerRadius=UDim.new(0,6)
 toggleCorner.Parent=toggleBtn
 local f=Instance.new("Frame")
-f.Size=UDim2.new(0,320,0,370)
-f.Position=UDim2.new(0.5,-160,0.5,-185)
+f.Size=UDim2.new(0,320,0,430)
+f.Position=UDim2.new(0.5,-160,0.5,-215)
 f.BackgroundColor3=Color3.fromRGB(30,30,30)
 f.BorderSizePixel=0
 f.Parent=g
@@ -203,9 +203,30 @@ webhookInput.TextColor3=Color3.fromRGB(255,255,255)
 webhookInput.TextSize=10
 webhookInput.Font=Enum.Font.Gotham
 webhookInput.Parent=f
+local petTrackLabel=Instance.new("TextLabel")
+petTrackLabel.Size=UDim2.new(0,280,0,20)
+petTrackLabel.Position=UDim2.new(0.5,-140,0,155)
+petTrackLabel.BackgroundTransparency=1
+petTrackLabel.Text="Track Pet Names (comma-separated, empty=all):"
+petTrackLabel.TextColor3=Color3.fromRGB(200,200,200)
+petTrackLabel.TextSize=9
+petTrackLabel.Font=Enum.Font.Gotham
+petTrackLabel.TextXAlignment=Enum.TextXAlignment.Left
+petTrackLabel.Parent=f
+local petTrackInput=Instance.new("TextBox")
+petTrackInput.Size=UDim2.new(0,280,0,30)
+petTrackInput.Position=UDim2.new(0.5,-140,0,175)
+petTrackInput.BackgroundColor3=Color3.fromRGB(40,40,40)
+petTrackInput.BorderSizePixel=0
+petTrackInput.Text=""
+petTrackInput.PlaceholderText="e.g., Arctic Fox, Flakey, King Polar Bear"
+petTrackInput.TextColor3=Color3.fromRGB(255,255,255)
+petTrackInput.TextSize=10
+petTrackInput.Font=Enum.Font.Gotham
+petTrackInput.Parent=f
 local logDisplay=Instance.new("TextLabel")
 logDisplay.Size=UDim2.new(0,280,0,80)
-logDisplay.Position=UDim2.new(0.5,-140,0,155)
+logDisplay.Position=UDim2.new(0.5,-140,0,215)
 logDisplay.BackgroundColor3=Color3.fromRGB(20,20,20)
 logDisplay.BorderSizePixel=0
 logDisplay.Text="Events: 0\nClick 'Start Capturing' to begin"
@@ -218,7 +239,7 @@ logDisplay.TextYAlignment=Enum.TextYAlignment.Top
 logDisplay.Parent=f
 local sendDataBtn=Instance.new("TextButton")
 sendDataBtn.Size=UDim2.new(0,135,0,35)
-sendDataBtn.Position=UDim2.new(0.5,-145,0,245)
+sendDataBtn.Position=UDim2.new(0.5,-145,0,305)
 sendDataBtn.BackgroundColor3=Color3.fromRGB(80,120,200)
 sendDataBtn.BorderSizePixel=0
 sendDataBtn.Text="Send Captured Data"
@@ -228,7 +249,7 @@ sendDataBtn.Font=Enum.Font.Gotham
 sendDataBtn.Parent=f
 local sendTestBtn=Instance.new("TextButton")
 sendTestBtn.Size=UDim2.new(0,135,0,35)
-sendTestBtn.Position=UDim2.new(0.5,10,0,245)
+sendTestBtn.Position=UDim2.new(0.5,10,0,305)
 sendTestBtn.BackgroundColor3=Color3.fromRGB(120,80,200)
 sendTestBtn.BorderSizePixel=0
 sendTestBtn.Text="Send Test"
@@ -238,7 +259,7 @@ sendTestBtn.Font=Enum.Font.Gotham
 sendTestBtn.Parent=f
 local startCaptureBtn=Instance.new("TextButton")
 startCaptureBtn.Size=UDim2.new(0,280,0,35)
-startCaptureBtn.Position=UDim2.new(0.5,-140,0,285)
+startCaptureBtn.Position=UDim2.new(0.5,-140,0,345)
 startCaptureBtn.BackgroundColor3=Color3.fromRGB(200,100,50)
 startCaptureBtn.BorderSizePixel=0
 startCaptureBtn.Text="Start Capturing"
@@ -267,7 +288,7 @@ logDisplay.Text=table.concat(lines,"\n")
 end
 local s=Instance.new("TextLabel")
 s.Size=UDim2.new(0,280,0,35)
-s.Position=UDim2.new(0.5,-140,0,330)
+s.Position=UDim2.new(0.5,-140,0,390)
 s.BackgroundTransparency=1
 s.Text="Status: Ready - Click 'Start Capturing'"
 s.TextColor3=Color3.fromRGB(200,200,200)
@@ -322,23 +343,50 @@ else
 return"[unknown type: "..vType.."]"
 end
 end
-local function simpleJsonEncode(t)
-local parts={}
-for k,v in pairs(t)do
-local key=type(k)=="string"and string.format("%q",k)or tostring(k)
-local val
-if type(v)=="string"then
-val=string.format("%q",v)
-elseif type(v)=="number"or type(v)=="boolean"then
-val=tostring(v)
-elseif type(v)=="nil"then
-val="null"
-else
-val=string.format("%q",tostring(v))
+local function jsonEncode(value,depth)
+depth=depth or 0
+if depth>10 then return'"max_depth"'end
+local vType=type(value)
+if vType=="string"then
+local escaped=string.gsub(value,"\\","\\\\")
+escaped=string.gsub(escaped,"\"","\\\"")
+escaped=string.gsub(escaped,"\n","\\n")
+escaped=string.gsub(escaped,"\r","\\r")
+escaped=string.gsub(escaped,"\t","\\t")
+return string.format("%q",escaped)
+elseif vType=="number"then
+return tostring(value)
+elseif vType=="boolean"then
+return value and"true"or"false"
+elseif vType=="nil"then
+return"null"
+elseif vType=="table"then
+local isArray=true
+local maxIndex=0
+for k in pairs(value)do
+if type(k)~="number"or k<1 or k~=math.floor(k)then
+isArray=false
+break
 end
-table.insert(parts,key..":"..val)
+if k>maxIndex then maxIndex=k end
+end
+if isArray and maxIndex>0 then
+local parts={}
+for i=1,maxIndex do
+table.insert(parts,jsonEncode(value[i],depth+1))
+end
+return"["..table.concat(parts,",").."]"
+else
+local parts={}
+for k,v in pairs(value)do
+local keyStr=type(k)=="string"and string.format("%q",k)or"["..tostring(k).."]"
+table.insert(parts,keyStr..":"..jsonEncode(v,depth+1))
 end
 return"{"..table.concat(parts,",").."}"
+end
+else
+return string.format("%q",tostring(value))
+end
 end
 local function sendWebhookFile(dataText)
 if WEBHOOK==""then 
@@ -355,67 +403,18 @@ end
 spawn(function()
 sendNotification("Sending Webhook","Attempting to send data...",3)
 local webhookUrl=WEBHOOK
-if#dataText>900 then
-local pasteUrl="https://pastebin.com/api/api_post.php"
-local pasteKey="b7b1a0b2e7e3b8b5e4e4e4e4e4e4e4e4"
-local function urlEncode(str)
-str=string.gsub(str,"\n","\\n")
-local result=""
-for i=1,#str do
-local c=string.sub(str,i,i)
-local b=string.byte(c)
-if(b>=48 and b<=57)or(b>=65 and b<=90)or(b>=97 and b<=122)or c==" "or c=="-"or c=="_"or c=="."then
-result=result..c
-else
-result=result..string.format("%%%02X",b)
-end
-end
-return result
-end
-local dataEncoded=urlEncode(dataText)
-local pasteData="api_dev_key="..pasteKey.."&api_option=paste&api_paste_code="..dataEncoded.."&api_paste_private=0"
-local headers={["Content-Type"]="application/x-www-form-urlencoded"}
-local pasteSuccess,pasteResponse=httpLib(pasteUrl,"POST",headers,pasteData)
-if pasteSuccess and pasteResponse and string.find(pasteResponse,"https://pastebin.com/")then
-local pasteLink=string.match(pasteResponse,"https://pastebin.com/[%w]+")
-if pasteLink then
-local message="Capture data: "..pasteLink
-local json=simpleJsonEncode({content=message})
-local webHeaders={["Content-Type"]="application/json"}
-local success,response,status=httpLib(webhookUrl,"POST",webHeaders,json)
-if success and(status==200 or status==204)then
-s.Text="Sent via Pastebin!"
-sendNotification("Success","Webhook sent via Pastebin!",5)
-task.wait(2)
-s.Text="Status: Ready"
-return
-else
-s.Text="Pastebin OK, webhook failed"
-sendNotification("Webhook Error","Pastebin uploaded but webhook failed",5)
-task.wait(2)
-s.Text="Status: Ready"
-return
-end
-end
-end
-s.Text="Pastebin failed, chunking..."
-sendNotification("Pastebin Failed","Falling back to chunks...",3)
-task.wait(1)
+if#dataText>1500 then
 local chunks={}
-local chunkSize=1700
+local chunkSize=1500
 for i=1,#dataText,chunkSize do
 local chunk=string.sub(dataText,i,i+chunkSize-1)
 table.insert(chunks,chunk)
 end
 for i,chunk in ipairs(chunks)do
-local escapedChunk=string.gsub(chunk,"\\","\\\\")
-escapedChunk=string.gsub(escapedChunk,"\"","\\\"")
-escapedChunk=string.gsub(escapedChunk,"\n","\\n")
-escapedChunk=string.gsub(escapedChunk,"\r","\\r")
-escapedChunk=string.gsub(escapedChunk,"\t","\\t")
-local json=simpleJsonEncode({content="```\n"..chunk.."\n```\n*Part "..i.."/"..#chunks.."*"})
+local payload={["content"]="```\n"..chunk.."\n```\n*Part "..i.."/"..#chunks.."*"}
+local jsonPayload=jsonEncode(payload)
 local headers={["Content-Type"]="application/json"}
-local success,response,status=httpLib(webhookUrl,"POST",headers,json)
+local success,response,status=httpLib(webhookUrl,"POST",headers,jsonPayload)
 if not success then
 sendNotification("Webhook Error","Failed to send chunk "..i.."/"..#chunks,5)
 end
@@ -426,14 +425,10 @@ sendNotification("Success","Sent "..#chunks.." chunks to webhook",5)
 task.wait(2)
 s.Text="Status: Ready"
 else
-local escaped=string.gsub(dataText,"\\","\\\\")
-escaped=string.gsub(escaped,"\"","\\\"")
-escaped=string.gsub(escaped,"\n","\\n")
-escaped=string.gsub(escaped,"\r","\\r")
-escaped=string.gsub(escaped,"\t","\\t")
-local json=simpleJsonEncode({content="```\n"..dataText.."\n```"})
+local payload={["content"]="```\n"..dataText.."\n```"}
+local jsonPayload=jsonEncode(payload)
 local headers={["Content-Type"]="application/json"}
-local success,response,status=httpLib(webhookUrl,"POST",headers,json)
+local success,response,status=httpLib(webhookUrl,"POST",headers,jsonPayload)
 if success and(status==200 or status==204)then
 s.Text="Webhook sent! ("..tostring(#dataText).." bytes)"
 sendNotification("Success","Webhook sent successfully!",5)
@@ -454,48 +449,133 @@ local function sendNotification(title,msg,duration)
 duration=duration or 10
 game:GetService("StarterGui"):SetCore("SendNotification",{Title=title,Text=msg,Duration=duration})
 end
+local trackedPets={}
 local hatchRemote=nil
+local originalFireClient=nil
 local hatchRemoteConnected=false
+local function sendDiscordWebhook(petName,eggName,isShiny,isMythic)
+if WEBHOOK==""then return end
+if not httpLib then return end
+spawn(function()
+local color=0x00ff00
+if isMythic then color=0xff00ff
+elseif isShiny then color=0xffd700
+end
+local petDisplay=petName
+if isShiny then petDisplay="✨ "..petDisplay end
+if isMythic then petDisplay="💎 "..petDisplay end
+local embed={
+["title"]="🎉 Pet Hatched!",
+["description"]=p.Name.." hatched a **"..petDisplay.."** from a **"..eggName.."**!",
+["color"]=color,
+["fields"]={
+{["name"]="Pet Name",["value"]=petName,["inline"]=true},
+{["name"]="Egg",["value"]=eggName,["inline"]=true},
+{["name"]="Rarity",["value"]=(isMythic and"Mythic"or isShiny and"Shiny"or"Normal"),["inline"]=true}
+},
+["timestamp"]=os.date("!%Y-%m-%dT%H:%M:%SZ"),
+["footer"]={["text"]="Bubblegum Script"}
+}
+local payload={["embeds"]={embed}}
+local jsonPayload=jsonEncode(payload)
+local headers={["Content-Type"]="application/json"}
+local success,response,status=httpLib(WEBHOOK,"POST",headers,jsonPayload)
+if not success or(status~=200 and status~=204)then
+addLog("Webhook failed: "..tostring(status or"error"))
+end
+end)
+end
+local function processHatchEvent(eventName,data)
+if eventName~="HatchEgg"then return end
+if not data or not data.Pets then return end
+eventCount=eventCount+1
+local eggName=data.Name or"Unknown Egg"
+local pets=data.Pets or{}
+local foundTracked=false
+for i,petData in ipairs(pets)do
+if petData.Pet then
+local pet=petData.Pet
+local petName=pet.Name or"Unknown"
+local isShiny=pet.Shiny==true
+local isMythic=pet.Mythic==true
+local isTracked=false
+if#trackedPets==0 then
+isTracked=true
+foundTracked=true
+else
+for trackedName in pairs(trackedPets)do
+if string.lower(petName)==string.lower(trackedName)then
+isTracked=true
+foundTracked=true
+break
+end
+end
+end
+if isTracked then
+local entry={}
+entry.time=os.date("%X")
+entry.event="HatchEgg"
+entry.petName=petName
+entry.eggName=eggName
+entry.shiny=isShiny
+entry.mythic=isMythic
+table.insert(capturedData,entry)
+local displayName=petName
+if isShiny then displayName="✨ "..displayName end
+if isMythic then displayName="💎 "..displayName end
+addLog("HATCHED: "..displayName.." ("..eggName..")")
+sendNotification("Hatched",displayName.." from "..eggName,3)
+if WEBHOOK~=""then
+sendDiscordWebhook(petName,eggName,isShiny,isMythic)
+end
+end
+end
+end
+if foundTracked or#trackedPets==0 then
+s.Text="Hatch captured! (#"..eventCount..")"
+end
+if#capturedData>1000 then
+table.remove(capturedData,1)
+end
+end
 local function hookHatchRemote()
-if hatchRemoteConnected then return end
+if hatchRemoteConnected then return true end
 local success,remote=pcall(function()
 return RS:FindFirstChild("Shared")and RS.Shared:FindFirstChild("Framework")and RS.Shared.Framework:FindFirstChild("Network")and RS.Shared.Framework.Network:FindFirstChild("Remote")and RS.Shared.Framework.Network.Remote:FindFirstChild("RemoteEvent")
 end)
 if success and remote then
 hatchRemote=remote
-local success2=pcall(function()
-remote.OnClientEvent:Connect(function(...)
+local success2,err=pcall(function()
+originalFireClient=remote.FireClient
+remote.FireClient=newcclosure(function(self,...)
 local args={...}
-eventCount=eventCount+1
-local entry={}
-entry.time=os.date("%X")
-entry.remote="HatchRemote"
-entry.remotePath=remote:GetFullName()
-entry.args={}
-for i,v in ipairs(args)do
-local serialized=serializeValue(v,0,true)
-entry.args[i]=serialized
-if i<=3 then
-addLog("Arg"..i..": "..string.sub(serialized,1,100))
+local firstArg=args[1]
+if type(firstArg)=="Instance"and firstArg:IsA("Player")then
+local player=firstArg
+local eventName=args[2]
+local data=args[3]
+if type(eventName)=="string"and type(data)=="table"and eventName=="HatchEgg"then
+processHatchEvent(eventName,data)
 end
+return originalFireClient(self,unpack(args))
+else
+local eventName=firstArg
+local data=args[2]
+if type(eventName)=="string"and type(data)=="table"and eventName=="HatchEgg"then
+processHatchEvent(eventName,data)
 end
-table.insert(capturedData,entry)
-s.Text="Hatch response captured!"
-addLog("HATCH RESPONSE! (#"..eventCount..")")
-sendNotification("Hatched","Pet hatched! Event #"..eventCount,3)
-if#capturedData>1000 then
-table.remove(capturedData,1)
+return originalFireClient(self,unpack(args))
 end
 end)
 end)
 if success2 then
 hatchRemoteConnected=true
-addLog("Hatch remote HOOKED!")
+addLog("Hatch remote HOOKED (FireClient)!")
 s.Text="Hatch remote ready!"
 sendNotification("Ready","Hatch remote hooked!",3)
 return true
 else
-addLog("Failed to connect to hatch remote")
+addLog("Failed to hook: "..tostring(err))
 return false
 end
 else
@@ -551,15 +631,23 @@ table.insert(lines,"Time: "..os.date("%Y-%m-%d %X"))
 table.insert(lines,"Events Captured: "..eventCount)
 table.insert(lines,"Storage Changes: "..(#storageChanges))
 table.insert(lines,"")
-table.insert(lines,"=== REMOTE EVENTS ===")
+table.insert(lines,"=== HATCH EVENTS ===")
 table.insert(lines,"")
 for i,entry in ipairs(capturedData)do
 table.insert(lines,"--- Event #"..i.." ["..entry.time.."] ---")
-table.insert(lines,"Remote: "..entry.remote)
-table.insert(lines,"Path: "..entry.remotePath)
+if entry.event then
+table.insert(lines,"Event: "..entry.event)
+table.insert(lines,"Pet: "..entry.petName)
+table.insert(lines,"Egg: "..entry.eggName)
+table.insert(lines,"Shiny: "..tostring(entry.shiny or false))
+table.insert(lines,"Mythic: "..tostring(entry.mythic or false))
+else
+table.insert(lines,"Remote: "..(entry.remote or"N/A"))
+table.insert(lines,"Path: "..(entry.remotePath or"N/A"))
 table.insert(lines,"Args:")
-for j,arg in ipairs(entry.args)do
+for j,arg in ipairs(entry.args or{})do
 table.insert(lines,"  ["..j.."] = "..arg)
+end
 end
 table.insert(lines,"")
 end
@@ -664,6 +752,32 @@ else
 s.Text="Webhook URL cleared"
 end
 end)
+petTrackInput.FocusLost:Connect(function()
+local input=petTrackInput.Text
+input=string.gsub(input,"^%s*(.-)%s*$","%1")
+trackedPets={}
+if input~=""then
+for petName in string.gmatch(input,"([^,]+)")do
+petName=string.gsub(petName,"^%s*(.-)%s*$","%1")
+if petName~=""then
+trackedPets[petName]=true
+end
+end
+local count=0
+for _ in pairs(trackedPets)do count=count+1 end
+s.Text="Tracking "..count.." pet name(s)"
+sendNotification("Saved","Tracking "..count.." pet(s)",3)
+else
+s.Text="Tracking all pets"
+sendNotification("Saved","Tracking all pets",3)
+end
+task.wait(2)
+if capturing then
+s.Text="Status: Ready"
+else
+s.Text="Status: Ready - Click 'Start Capturing'"
+end
+end)
 toggleBtn.Activated:Connect(function()
 f.Visible=not f.Visible
 if f.Visible then
@@ -739,11 +853,12 @@ sendNotification("Sending","Sending test message...",3)
 task.wait(0.3)
 local webhookUrl=WEBHOOK
 local testContent="Test from Bubblegum Script v1 - "..os.date("%X")
-local json=simpleJsonEncode({content=testContent})
+local payload={["content"]=testContent}
+local jsonPayload=jsonEncode(payload)
 local headers={["Content-Type"]="application/json"}
 s.Text="Calling HTTP..."
 addLog("Calling HTTP...")
-local success,response,status=httpLib(webhookUrl,"POST",headers,json)
+local success,response,status=httpLib(webhookUrl,"POST",headers,jsonPayload)
 s.Text="Got response..."
 task.wait(0.2)
 if success and status and(status==200 or status==204)then
@@ -782,3 +897,4 @@ startCaptureBtn.Text="Capturing Active"
 startCaptureBtn.BackgroundColor3=Color3.fromRGB(50,200,50)
 end)
 game:GetService("StarterGui"):SetCore("SendNotification",{Title="Loading",Text="Script initializing...",Duration=3})
+
