@@ -454,65 +454,53 @@ local function sendNotification(title,msg,duration)
 duration=duration or 10
 game:GetService("StarterGui"):SetCore("SendNotification",{Title=title,Text=msg,Duration=duration})
 end
-local hooked={}
-local connectionMap={}
-local function hookRemote(r)
-if hooked[r]then return end
-hooked[r]=true
-if r:IsA("RemoteEvent")then
-local success1,err1=pcall(function()
-local conn=r.OnClientEvent:Connect(function(...)
+local hatchRemote=nil
+local hatchRemoteConnected=false
+local function hookHatchRemote()
+if hatchRemoteConnected then return end
+local success,remote=pcall(function()
+return RS:FindFirstChild("Shared")and RS.Shared:FindFirstChild("Framework")and RS.Shared.Framework:FindFirstChild("Network")and RS.Shared.Framework.Network:FindFirstChild("Remote")and RS.Shared.Framework.Network.Remote:FindFirstChild("RemoteEvent")
+end)
+if success and remote then
+hatchRemote=remote
+local success2=pcall(function()
+remote.OnClientEvent:Connect(function(...)
 local args={...}
 eventCount=eventCount+1
 local entry={}
 entry.time=os.date("%X")
-entry.remote=r.Name
-entry.remotePath=r:GetFullName()
+entry.remote="HatchRemote"
+entry.remotePath=remote:GetFullName()
 entry.args={}
 for i,v in ipairs(args)do
-entry.args[i]=serializeValue(v,0,true)
+local serialized=serializeValue(v,0,true)
+entry.args[i]=serialized
+if i<=3 then
+addLog("Arg"..i..": "..string.sub(serialized,1,100))
+end
 end
 table.insert(capturedData,entry)
-addLog("Event: "..r.Name)
-sendNotification("Event","Captured: "..r.Name,2)
-if#capturedData>5000 then
+s.Text="Hatch response captured!"
+addLog("HATCH RESPONSE! (#"..eventCount..")")
+sendNotification("Hatched","Pet hatched! Event #"..eventCount,3)
+if#capturedData>1000 then
 table.remove(capturedData,1)
 end
 end)
-connectionMap[r]=conn
 end)
-if not success1 then
-addLog("Hook failed: "..r.Name.." - "..tostring(err1))
+if success2 then
+hatchRemoteConnected=true
+addLog("Hatch remote HOOKED!")
+s.Text="Hatch remote ready!"
+sendNotification("Ready","Hatch remote hooked!",3)
+return true
+else
+addLog("Failed to connect to hatch remote")
+return false
 end
-elseif r:IsA("RemoteFunction")then
-local success1,err1=pcall(function()
-local originalInvoke=r.OnClientInvoke
-r.OnClientInvoke=function(...)
-local args={...}
-eventCount=eventCount+1
-local entry={}
-entry.time=os.date("%X")
-entry.remote=r.Name.." (Invoke)"
-entry.remotePath=r:GetFullName()
-entry.args={}
-for i,v in ipairs(args)do
-entry.args[i]=serializeValue(v,0,true)
-end
-table.insert(capturedData,entry)
-addLog("Invoke: "..r.Name)
-sendNotification("Invoke","Captured: "..r.Name,2)
-if#capturedData>5000 then
-table.remove(capturedData,1)
-end
-if originalInvoke then
-return originalInvoke(...)
-end
-return nil
-end
-end)
-if not success1 then
-addLog("Hook failed: "..r.Name.." - "..tostring(err1))
-end
+else
+addLog("Hatch remote not found")
+return false
 end
 end
 local function captureStorageChanges()
@@ -588,41 +576,22 @@ end
 return table.concat(lines,"\n")
 end
 local function scanForRemotes()
-local count=0
-local remoteNames={}
-local function scanInstance(inst)
-for _,v in pairs(inst:GetDescendants())do
-if v:IsA("RemoteEvent")or v:IsA("RemoteFunction")then
-hookRemote(v)
-count=count+1
-table.insert(remoteNames,v.Name.." ("..v.ClassName..") @ "..v:GetFullName())
+addLog("Looking for hatch remote...")
+local found=hookHatchRemote()
+if found then
+addLog("Successfully hooked hatch remote!")
+return 1
+else
+addLog("Hatch remote not found, retrying...")
+task.wait(2)
+found=hookHatchRemote()
+if found then
+return 1
+else
+addLog("Still not found. Game may not be loaded.")
+return 0
 end
 end
-end
-scanInstance(RS)
-scanInstance(WS)
-scanInstance(SS)
-scanInstance(P)
-scanInstance(game:GetService("StarterPack"))
-scanInstance(game:GetService("StarterPlayer"))
-scanInstance(game:GetService("ReplicatedFirst"))
-scanInstance(game:GetService("Lighting"))
-scanInstance(game:GetService("SoundService"))
-for _,service in pairs(game:GetServices())do
-if service~=game then
-scanInstance(service)
-end
-end
-if count>0 then
-addLog("Found "..count.." remotes:")
-for i=1,math.min(3,#remoteNames)do
-addLog("  "..remoteNames[i])
-end
-if#remoteNames>3 then
-addLog("  ... +"..(#remoteNames-3).." more")
-end
-end
-return count
 end
 local function startCapture()
 if capturing then return end
@@ -650,34 +619,11 @@ sendNotification("Ready","Data capture active! Events: "..count,5)
 end
 end)
 end
-RS.DescendantAdded:Connect(function(desc)
-task.wait()
-if(desc:IsA("RemoteEvent")or desc:IsA("RemoteFunction"))and not hooked[desc]then 
-hookRemote(desc)
-addLog("New remote: "..desc.Name)
-end
-end)
-WS.DescendantAdded:Connect(function(desc)
-task.wait()
-if(desc:IsA("RemoteEvent")or desc:IsA("RemoteFunction"))and not hooked[desc]then 
-hookRemote(desc)
-addLog("New remote: "..desc.Name)
-end
-end)
-game.DescendantAdded:Connect(function(desc)
-task.wait()
-if(desc:IsA("RemoteEvent")or desc:IsA("RemoteFunction"))and not hooked[desc]then 
-hookRemote(desc)
-end
-end)
 spawn(function()
 while true do
-task.wait(5)
-for _,v in pairs(RS:GetDescendants())do
-if(v:IsA("RemoteEvent")or v:IsA("RemoteFunction"))and not hooked[v]then
-hookRemote(v)
-addLog("Found late: "..v.Name)
-end
+task.wait(3)
+if not hatchRemoteConnected then
+hookHatchRemote()
 end
 end
 end)
