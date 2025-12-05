@@ -1,9 +1,24 @@
 local P=game:GetService("Players")
 local RS=game:GetService("ReplicatedStorage")
-local HS=game:GetService("HttpService")
 local p=P.LocalPlayer
-pcall(function()HS.HttpEnabled=true end)
 wait(1)
+local httpLib=nil
+if syn and syn.request then
+httpLib=function(url,method,headers,body)
+local res=syn.request({Url=url,Method=method,Headers=headers or{},Body=body})
+return res.Success,res.Body,res.StatusCode
+end
+elseif request then
+httpLib=function(url,method,headers,body)
+local res=request({url=url,method=method,headers=headers or{},body=body})
+return res.Success or res.success,res.Body or res.body
+end
+elseif http and http.request then
+httpLib=function(url,method,headers,body)
+local res=http.request({url=url,method=method,headers=headers or{},body=body})
+return res.Success or res.success,res.Body or res.body
+end
+end
 local g=Instance.new("ScreenGui")
 g.Name="BubblegumScript"
 g.Parent=p.PlayerGui
@@ -60,37 +75,17 @@ webhookInput.Position=UDim2.new(0.5,-140,0,115)
 webhookInput.BackgroundColor3=Color3.fromRGB(40,40,40)
 webhookInput.BorderSizePixel=0
 webhookInput.Text=""
-webhookInput.PlaceholderText="Discord webhook (auto-tries proxies)"
+webhookInput.PlaceholderText="Discord webhook URL"
 webhookInput.TextColor3=Color3.fromRGB(255,255,255)
 webhookInput.TextSize=10
 webhookInput.Font=Enum.Font.Gotham
 webhookInput.Parent=f
-local secretLabel=Instance.new("TextLabel")
-secretLabel.Size=UDim2.new(0,280,0,20)
-secretLabel.Position=UDim2.new(0.5,-140,0,135)
-secretLabel.BackgroundTransparency=1
-secretLabel.Text="Secret Pets (comma separated):"
-secretLabel.TextColor3=Color3.fromRGB(200,200,200)
-secretLabel.TextSize=10
-secretLabel.Font=Enum.Font.Gotham
-secretLabel.TextXAlignment=Enum.TextXAlignment.Left
-secretLabel.Parent=f
-local secretInput=Instance.new("TextBox")
-secretInput.Size=UDim2.new(0,280,0,30)
-secretInput.Position=UDim2.new(0.5,-140,0,175)
-secretInput.BackgroundColor3=Color3.fromRGB(40,40,40)
-secretInput.BorderSizePixel=0
-secretInput.Text="snowball"
-secretInput.TextColor3=Color3.fromRGB(255,255,255)
-secretInput.TextSize=10
-secretInput.Font=Enum.Font.Gotham
-secretInput.Parent=f
 local logDisplay=Instance.new("TextLabel")
-logDisplay.Size=UDim2.new(0,280,0,30)
-logDisplay.Position=UDim2.new(0.5,-140,0,215)
+logDisplay.Size=UDim2.new(0,280,0,80)
+logDisplay.Position=UDim2.new(0.5,-140,0,130)
 logDisplay.BackgroundColor3=Color3.fromRGB(20,20,20)
 logDisplay.BorderSizePixel=0
-logDisplay.Text="Recent hatches will appear here"
+logDisplay.Text="Data capture active...\nEvents logged: 0"
 logDisplay.TextColor3=Color3.fromRGB(150,200,255)
 logDisplay.TextSize=9
 logDisplay.Font=Enum.Font.Gotham
@@ -98,11 +93,24 @@ logDisplay.TextWrapped=true
 logDisplay.TextXAlignment=Enum.TextXAlignment.Left
 logDisplay.TextYAlignment=Enum.TextYAlignment.Top
 logDisplay.Parent=f
-local recentLogs={}
 local function addLog(text)
-table.insert(recentLogs,text)
-while #recentLogs>3 do table.remove(recentLogs,1)end
-logDisplay.Text=table.concat(recentLogs,"\n")
+local current=logDisplay.Text or""
+local lines={}
+local hasHeader=false
+for line in string.gmatch(current,"([^\n]+)")do
+if string.find(line,"^Events:")then
+hasHeader=true
+table.insert(lines,"Events: "..eventCount)
+else
+table.insert(lines,line)
+end
+end
+if not hasHeader then
+table.insert(lines,"Events: "..eventCount)
+end
+table.insert(lines,text)
+while #lines>6 do table.remove(lines,2)end
+logDisplay.Text=table.concat(lines,"\n")
 end
 local s=Instance.new("TextLabel")
 s.Size=UDim2.new(0,280,0,35)
@@ -116,90 +124,111 @@ s.TextWrapped=true
 s.Parent=f
 local en=false
 local WEBHOOK=""
-local secretPets={"snowball"}
-local processedMessages={}
-local function hasProcessedMessage(messageContent)
-if processedMessages[messageContent]then
-return true
+local capturedData={}
+local eventCount=0
+local lastCaptureTime=0
+local captureTimer=0
+local function serializeValue(v,depth)
+depth=depth or 0
+if depth>3 then return"[Max Depth]"end
+local vType=type(v)
+if vType=="string"then
+if#v>500 then return string.sub(v,1,500).."[truncated]"end
+return string.format("%q",v)
+elseif vType=="number"or vType=="boolean"then
+return tostring(v)
+elseif vType=="nil"then
+return"nil"
+elseif vType=="table"then
+local parts={"{"}
+for k,val in pairs(v)do
+local keyStr=type(k)=="string"and string.format("[%q]",k)or"["..tostring(k).."]"
+local valStr=serializeValue(val,depth+1)
+table.insert(parts,keyStr.."="..valStr)
 end
-processedMessages[messageContent]=true
-local count=0
-for _ in pairs(processedMessages)do
-count=count+1
+table.insert(parts,"}")
+return table.concat(parts,"")
+elseif vType=="userdata"then
+local success,result=pcall(function()
+if v.Name then
+return v.ClassName..': "'..v.Name..'"'
+elseif v.ClassName then
+return v.ClassName
 end
-if count>50 then
-local keys={}
-for k in pairs(processedMessages)do
-table.insert(keys,k)
-end
-for i=1,25 do
-processedMessages[keys[i]]=nil
-end
-end
-return false
-end
-local function updateSecretPets()
-local text=secretInput.Text
-if text and text~=""then
-secretPets={}
-for pet in string.gmatch(text,"([^,]+)")do
-table.insert(secretPets,string.lower(string.gsub(pet,"^%s*(.-)%s*$","%1")))
-end
-end
-end
-updateSecretPets()
-secretInput.FocusLost:Connect(function()
-updateSecretPets()
-s.Text="Secret pets updated!"
-task.wait(1)
-s.Text="Status: Ready"
 end)
-local function sendWebhook(msg)
+if success and result then return result end
+return"[userdata]"
+else
+return"[unknown type: "..vType.."]"
+end
+end
+local function simpleJsonEncode(t)
+local parts={}
+for k,v in pairs(t)do
+local key=type(k)=="string"and string.format("%q",k)or tostring(k)
+local val
+if type(v)=="string"then
+val=string.format("%q",v)
+elseif type(v)=="number"or type(v)=="boolean"then
+val=tostring(v)
+elseif type(v)=="nil"then
+val="null"
+else
+val=string.format("%q",tostring(v))
+end
+table.insert(parts,key..":"..val)
+end
+return"{"..table.concat(parts,",").."}"
+end
+local function sendWebhookFile(dataText)
 if WEBHOOK==""then return end
+if not httpLib then
+s.Text="HTTP library not found!"
+task.wait(2)
+s.Text="Status: Ready"
+return
+end
 spawn(function()
 local webhookUrl=WEBHOOK
-local proxies={"webhook.lewisakura.dev","webhook.lewisakura.moe","webhook.whitehill.group"}
-local success=false
-if string.find(webhookUrl,"discord%.com")then
-for _,proxy in ipairs(proxies)do
-local testUrl=string.gsub(webhookUrl,"discord%.com",proxy)
-local testSuccess=pcall(function()
-HS:PostAsync(testUrl,HS:JSONEncode({content=msg}),Enum.HttpContentType.ApplicationJson)
-end)
-if testSuccess then
-success=true
-if s then s.Text="Webhook sent! (via "..proxy..")"end
+if#dataText>1800 then
+local chunks={}
+local chunkSize=1800
+for i=1,#dataText,chunkSize do
+local chunk=string.sub(dataText,i,i+chunkSize-1)
+table.insert(chunks,chunk)
+end
+for i,chunk in ipairs(chunks)do
+local escapedChunk=string.gsub(chunk,"\\","\\\\")
+escapedChunk=string.gsub(escapedChunk,"\"","\\\"")
+escapedChunk=string.gsub(escapedChunk,"\n","\\n")
+escapedChunk=string.gsub(escapedChunk,"\r","\\r")
+escapedChunk=string.gsub(escapedChunk,"\t","\\t")
+local json=simpleJsonEncode({content="```\n"..chunk.."\n```\n*Part "..i.."/"..#chunks.."*"})
+local headers={["Content-Type"]="application/json"}
+httpLib(webhookUrl,"POST",headers,json)
+task.wait(0.5)
+end
+s.Text="Sent "..#chunks.." chunks!"
 task.wait(2)
-if s then s.Text="Status: Ready"end
-break
-end
-end
-if not success then
-local directSuccess=pcall(function()
-HS:PostAsync(webhookUrl,HS:JSONEncode({content=msg}),Enum.HttpContentType.ApplicationJson)
-end)
-if directSuccess then
-success=true
-if s then s.Text="Webhook sent! (direct)"end
-task.wait(2)
-if s then s.Text="Status: Ready"end
-end
-end
-else
-local directSuccess=pcall(function()
-HS:PostAsync(webhookUrl,HS:JSONEncode({content=msg}),Enum.HttpContentType.ApplicationJson)
-end)
-if directSuccess then
-success=true
-if s then s.Text="Webhook sent!"end
-task.wait(2)
-if s then s.Text="Status: Ready"end
-end
-end
-if not success and s then
-s.Text="Webhooks blocked"
-task.wait(1)
 s.Text="Status: Ready"
+else
+local escaped=string.gsub(dataText,"\\","\\\\")
+escaped=string.gsub(escaped,"\"","\\\"")
+escaped=string.gsub(escaped,"\n","\\n")
+escaped=string.gsub(escaped,"\r","\\r")
+escaped=string.gsub(escaped,"\t","\\t")
+local json=simpleJsonEncode({content="```\n"..dataText.."\n```"})
+local headers={["Content-Type"]="application/json"}
+local success,response,status=httpLib(webhookUrl,"POST",headers,json)
+if success and(status==200 or status==204)then
+s.Text="Webhook sent! ("..tostring(#dataText).." bytes)"
+task.wait(2)
+s.Text="Status: Ready"
+else
+s.Text="Webhook failed"
+task.wait(2)
+s.Text="Status: Ready"
+end
 end
 end)
 end
@@ -208,67 +237,100 @@ duration=duration or 10
 game:GetService("StarterGui"):SetCore("SendNotification",{Title=title,Text=msg,Duration=duration})
 end
 local hooked={}
-local processing={}
 local function hookRemote(r)
 if hooked[r]then return end
 hooked[r]=true
 if r:IsA("RemoteEvent")then
 r.OnClientEvent:Connect(function(...)
 local args={...}
-if args[2]=="ServerHatch"and type(args[1])=="string"then
-local message=args[1]
-if processing[message]then return end
-if hasProcessedMessage(message)then return end
-processing[message]=true
-spawn(function()
-task.wait(0.5)
-processing[message]=nil
-end)
-local playerName=p.Name
-local nameMatch=string.match(message,"<font color=\"#[^\"]+\">([^<]+)</font> just hatched")
-if nameMatch and nameMatch==playerName then
-local petMatch=string.match(message,"just hatched a <font color=\"#[^\"]+\">([^<]+)</font>")
-if petMatch then
-petMatch=string.gsub(petMatch,"^%s*(.-)%s*$","%1")
-petMatch=string.gsub(petMatch,"%s*%(%d+%.?%d*%%%)%s*$","")
-petMatch=string.gsub(petMatch,"^%s*(.-)%s*$","%1")
-local petLower=string.lower(petMatch)
-local isSecret=false
-s.Text="Hatched: "..petMatch
-addLog("Hatched: "..petMatch)
-sendNotification("Pet Hatched!",playerName.." hatched "..petMatch,5)
-for _,secret in ipairs(secretPets)do
-if string.find(petLower,secret)then
-isSecret=true
-local msg=playerName.." hatched a "..petMatch.."!"
-s.Text="SECRET: "..petMatch
-addLog("⭐ SECRET: "..petMatch)
-sendNotification("SECRET PET!",msg,10)
-spawn(function()sendWebhook(msg)end)
-break
+eventCount=eventCount+1
+lastCaptureTime=tick()
+local entry={}
+entry.time=os.date("%X")
+entry.remote=r.Name
+entry.remotePath=r:GetFullName()
+entry.args={}
+for i,v in ipairs(args)do
+entry.args[i]=serializeValue(v)
 end
-end
-end
-end
+table.insert(capturedData,entry)
+addLog("Event: "..r.Name.." (#"..eventCount..")")
+if#capturedData>1000 then
+table.remove(capturedData,1)
 end
 end)
+elseif r:IsA("RemoteFunction")then
+r.OnClientInvoke=function(...)
+local args={...}
+eventCount=eventCount+1
+lastCaptureTime=tick()
+local entry={}
+entry.time=os.date("%X")
+entry.remote=r.Name.." (Invoke)"
+entry.remotePath=r:GetFullName()
+entry.args={}
+for i,v in ipairs(args)do
+entry.args[i]=serializeValue(v)
 end
+table.insert(capturedData,entry)
+addLog("Invoke: "..r.Name.." (#"..eventCount..")")
+if#capturedData>1000 then
+table.remove(capturedData,1)
+end
+return nil
+end
+end
+end
+local function formatDataForFile()
+local lines={}
+table.insert(lines,"=== BUBBLEGUM SIMULATOR DATA CAPTURE ===")
+table.insert(lines,"Player: "..p.Name)
+table.insert(lines,"Time: "..os.date("%Y-%m-%d %X"))
+table.insert(lines,"Events Captured: "..eventCount)
+table.insert(lines,"")
+table.insert(lines,"=== REMOTE EVENTS ===")
+table.insert(lines,"")
+for i,entry in ipairs(capturedData)do
+table.insert(lines,"--- Event #"..i.." ["..entry.time.."] ---")
+table.insert(lines,"Remote: "..entry.remote)
+table.insert(lines,"Path: "..entry.remotePath)
+table.insert(lines,"Args:")
+for j,arg in ipairs(entry.args)do
+table.insert(lines,"  ["..j.."] = "..arg)
+end
+table.insert(lines,"")
+end
+return table.concat(lines,"\n")
 end
 spawn(function()
 wait(2)
 local count=0
 for _,v in pairs(RS:GetDescendants())do
-if v:IsA("RemoteEvent")then 
+if v:IsA("RemoteEvent")or v:IsA("RemoteFunction")then 
 hookRemote(v)
 count=count+1
 end
 end
-s.Text="Hooked "..count.." RemoteEvents - Ready!"
-task.wait(2)
-s.Text="Status: Ready"
+s.Text="Hooked "..count.." Remotes - Capturing..."
 end)
 RS.ChildAdded:Connect(function(child)
-if child:IsA("RemoteEvent")then hookRemote(child)end
+if child:IsA("RemoteEvent")or child:IsA("RemoteFunction")then hookRemote(child)end
+end)
+RS.DescendantAdded:Connect(function(desc)
+if(desc:IsA("RemoteEvent")or desc:IsA("RemoteFunction"))and not hooked[desc]then hookRemote(desc)end
+end)
+spawn(function()
+while true do
+task.wait(1)
+if lastCaptureTime>0 and tick()-lastCaptureTime>=20 and#capturedData>0 then
+local dataText=formatDataForFile()
+sendWebhookFile(dataText)
+capturedData={}
+eventCount=0
+lastCaptureTime=0
+addLog("Data sent! Resetting...")
+end
+end
 end)
 b1.Activated:Connect(function()
 en=not en
