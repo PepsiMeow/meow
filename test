@@ -1,4 +1,4 @@
--- Test: What if we use Activated instead of MouseButton1Click?
+-- Test: Does ONE button work (same as test_button_activate but match minimal structure)
 
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
@@ -6,7 +6,7 @@ local player = Players.LocalPlayer
 wait(1)
 
 local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "TestButtonActivate"
+screenGui.Name = "TestOneButton"
 screenGui.Parent = player.PlayerGui
 
 local frame = Instance.new("Frame")
@@ -46,20 +46,19 @@ local statusLabel = Instance.new("TextLabel")
 statusLabel.Size = UDim2.new(0, 280, 0, 50)
 statusLabel.Position = UDim2.new(0.5, -140, 0, 100)
 statusLabel.BackgroundTransparency = 1
-statusLabel.Text = "Status: Try Activated event"
+statusLabel.Text = "Status: Waiting..."
 statusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
 statusLabel.TextSize = 12
 statusLabel.Font = Enum.Font.Gotham
 statusLabel.Parent = frame
 
--- Try using Activated instead of MouseButton1Click
 button.Activated:Connect(function()
     statusLabel.Text = "Activated!"
 end)
 
 game.StarterGui:SetCore("SendNotification", {
-    Title = "Activated Test",
-    Text = "Using Activated event instead",
+    Title = "One Button Test",
+    Text = "Same as working test but matching minimal structure",
     Duration = 5
 })
 
