@@ -1,65 +1,840 @@
--- Test: Does ONE button work (same as test_button_activate but match minimal structure)
-
-local Players = game:GetService("Players")
-local player = Players.LocalPlayer
-
+local P=game:GetService("Players")
+local RS=game:GetService("ReplicatedStorage")
+local WS=game:GetService("Workspace")
+local SS=game:GetService("StarterGui")
+local p=P.LocalPlayer
+local newcclosure=newcclosure or function(func)return func end
 wait(1)
-
-local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "TestOneButton"
-screenGui.Parent = player.PlayerGui
-
-local frame = Instance.new("Frame")
-frame.Size = UDim2.new(0, 320, 0, 280)
-frame.Position = UDim2.new(0.5, -160, 0.5, -140)
-frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-frame.BorderSizePixel = 0
-frame.Parent = screenGui
-
-local corner = Instance.new("UICorner")
-corner.CornerRadius = UDim.new(0, 8)
-corner.Parent = frame
-
-local title = Instance.new("TextLabel")
-title.Size = UDim2.new(1, 0, 0, 40)
-title.Position = UDim2.new(0, 0, 0, 0)
-title.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-title.BorderSizePixel = 0
-title.Text = "Test Title"
-title.TextColor3 = Color3.fromRGB(255, 255, 255)
-title.TextSize = 18
-title.Font = Enum.Font.GothamBold
-title.Parent = frame
-
-local button = Instance.new("TextButton")
-button.Size = UDim2.new(0, 280, 0, 35)
-button.Position = UDim2.new(0.5, -140, 0, 50)
-button.BackgroundColor3 = Color3.fromRGB(60, 120, 200)
-button.BorderSizePixel = 0
-button.Text = "Test Button"
-button.TextColor3 = Color3.fromRGB(255, 255, 255)
-button.TextSize = 14
-button.Font = Enum.Font.Gotham
-button.Parent = frame
-
-local statusLabel = Instance.new("TextLabel")
-statusLabel.Size = UDim2.new(0, 280, 0, 50)
-statusLabel.Position = UDim2.new(0.5, -140, 0, 100)
-statusLabel.BackgroundTransparency = 1
-statusLabel.Text = "Status: Waiting..."
-statusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-statusLabel.TextSize = 12
-statusLabel.Font = Enum.Font.Gotham
-statusLabel.Parent = frame
-
-button.Activated:Connect(function()
-    statusLabel.Text = "Activated!"
+local httpLib=nil
+local httpLibName=""
+local httpErrorMsg=""
+if delta and delta.request then
+httpLib=function(url,method,headers,body)
+local success,res,err=pcall(function()
+return delta.request({Url=url,Method=method,Headers=headers or{},Body=body})
 end)
-
-game.StarterGui:SetCore("SendNotification", {
-    Title = "One Button Test",
-    Text = "Same as working test but matching minimal structure",
-    Duration = 5
-})
-
-
+if success and res then
+local status=res.StatusCode or(res.Success and 200 or 0)
+local body=res.Body or""
+local ok=res.Success or status==200 or status==204
+httpErrorMsg=ok and""or("Status: "..tostring(status))
+return ok,body,status
+end
+httpErrorMsg=err or"Request exception"
+return false,httpErrorMsg,0
+end
+httpLibName="delta.request"
+elseif delta and delta.http then
+httpLib=function(url,method,headers,body)
+local success,res,err=pcall(function()
+return delta.http.post(url,body,headers or{})
+end)
+if success and res then
+return true,res or"",200
+end
+httpErrorMsg=err or"HTTP exception"
+return false,httpErrorMsg,0
+end
+httpLibName="delta.http"
+elseif _G.http_request then
+httpLib=function(url,method,headers,body)
+local success,res,err=pcall(function()
+return _G.http_request({Url=url,Method=method,Headers=headers or{},Body=body})
+end)
+if success and res then
+local status=res.StatusCode or(res.Success and 200 or 0)
+local body=res.Body or""
+local ok=res.Success or status==200 or status==204
+httpErrorMsg=ok and""or("Status: "..tostring(status))
+return ok,body,status
+end
+httpErrorMsg=err or"http_request exception"
+return false,httpErrorMsg,0
+end
+httpLibName="_G.http_request"
+elseif syn and syn.request then
+httpLib=function(url,method,headers,body)
+local success,res,err=pcall(function()
+return syn.request({Url=url,Method=method,Headers=headers or{},Body=body})
+end)
+if success and res then
+local status=res.StatusCode or(res.Success and 200 or 0)
+local body=res.Body or""
+local ok=res.Success or status==200 or status==204
+httpErrorMsg=ok and""or("Status: "..tostring(status))
+return ok,body,status
+end
+httpErrorMsg=err or"Request exception"
+return false,httpErrorMsg,0
+end
+httpLibName="syn.request"
+elseif request then
+httpLib=function(url,method,headers,body)
+local success,res,err=pcall(function()
+return request({url=url,method=method,headers=headers or{},body=body})
+end)
+if success and res then
+local status=res.StatusCode or(res.Success and 200 or(res.success and 200 or 0))
+local body=res.Body or res.body or""
+local ok=res.Success or res.success or status==200 or status==204
+httpErrorMsg=ok and""or("Status: "..tostring(status))
+return ok,body,status
+end
+httpErrorMsg=err or"Request exception"
+return false,httpErrorMsg,0
+end
+httpLibName="request"
+elseif http and http.post then
+httpLib=function(url,method,headers,body)
+if method=="POST"then
+local success,res,err=pcall(function()
+return http.post(url,body,headers or{})
+end)
+if success and res then
+return true,res or"",200
+end
+httpErrorMsg=err or"Post exception"
+return false,httpErrorMsg,0
+end
+return false,"Only POST supported",0
+end
+httpLibName="http.post"
+end
+if not httpLib then
+httpLibName="None - trying game:HttpGet proxy"
+local HS=game:GetService("HttpService")
+pcall(function()HS.HttpEnabled=true end)
+httpLib=function(url,method,headers,body)
+local success,result=pcall(function()
+if method=="POST"then
+local contentMatch=string.match(body,'"content":"([^"]+)"')
+if not contentMatch then
+contentMatch=string.match(body,"content[^:]*:%s*\"([^\"]+)\"")
+end
+if contentMatch then
+local proxyUrl="https://webhook.lewisakura.moe/"
+if string.find(url,"discord%.com")then
+local webhookId=string.match(url,"webhooks/(%d+)/")
+local webhookToken=string.match(url,"webhooks/%d+/([%w_-]+)")
+if webhookId and webhookToken then
+proxyUrl=proxyUrl..webhookId.."/"..webhookToken
+local finalUrl=proxyUrl.."?content="..HS:UrlEncode(contentMatch)
+game:HttpGet(finalUrl)
+return true,"",200
+end
+end
+end
+return false,"Parse failed",0
+end
+return false,"Only POST",0
+end)
+return success,result or"",success and 200 or 0
+end
+end
+local g=Instance.new("ScreenGui")
+g.Name="BubblegumScript"
+g.Parent=p.PlayerGui
+local toggleBtn=Instance.new("TextButton")
+toggleBtn.Name="ToggleButton"
+toggleBtn.Size=UDim2.new(0,40,0,40)
+toggleBtn.Position=UDim2.new(1,-45,0,5)
+toggleBtn.BackgroundColor3=Color3.fromRGB(60,120,200)
+toggleBtn.BorderSizePixel=0
+toggleBtn.Text="GUI"
+toggleBtn.TextColor3=Color3.fromRGB(255,255,255)
+toggleBtn.TextSize=12
+toggleBtn.Font=Enum.Font.GothamBold
+toggleBtn.Parent=g
+local toggleCorner=Instance.new("UICorner")
+toggleCorner.CornerRadius=UDim.new(0,6)
+toggleCorner.Parent=toggleBtn
+local f=Instance.new("Frame")
+f.Size=UDim2.new(0,320,0,370)
+f.Position=UDim2.new(0.5,-160,0.5,-185)
+f.BackgroundColor3=Color3.fromRGB(30,30,30)
+f.BorderSizePixel=0
+f.Parent=g
+local t=Instance.new("TextLabel")
+t.Size=UDim2.new(1,0,0,40)
+t.BackgroundColor3=Color3.fromRGB(40,40,40)
+t.Text="Bubblegum Script"
+t.TextColor3=Color3.fromRGB(255,255,255)
+t.TextSize=18
+t.Font=Enum.Font.GothamBold
+t.Parent=f
+local b1=Instance.new("TextButton")
+b1.Size=UDim2.new(0,280,0,35)
+b1.Position=UDim2.new(0.5,-140,0,50)
+b1.BackgroundColor3=Color3.fromRGB(60,60,60)
+b1.Text="Auto Hatch: OFF"
+b1.TextColor3=Color3.fromRGB(255,255,255)
+b1.TextSize=14
+b1.Font=Enum.Font.Gotham
+b1.Parent=f
+local webhookLabel=Instance.new("TextLabel")
+webhookLabel.Size=UDim2.new(0,280,0,20)
+webhookLabel.Position=UDim2.new(0.5,-140,0,95)
+webhookLabel.BackgroundTransparency=1
+webhookLabel.Text="Webhook URL:"
+webhookLabel.TextColor3=Color3.fromRGB(200,200,200)
+webhookLabel.TextSize=10
+webhookLabel.Font=Enum.Font.Gotham
+webhookLabel.TextXAlignment=Enum.TextXAlignment.Left
+webhookLabel.Parent=f
+local webhookInput=Instance.new("TextBox")
+webhookInput.Size=UDim2.new(0,280,0,30)
+webhookInput.Position=UDim2.new(0.5,-140,0,115)
+webhookInput.BackgroundColor3=Color3.fromRGB(40,40,40)
+webhookInput.BorderSizePixel=0
+webhookInput.Text=""
+webhookInput.PlaceholderText="Discord webhook URL"
+webhookInput.TextColor3=Color3.fromRGB(255,255,255)
+webhookInput.TextSize=10
+webhookInput.Font=Enum.Font.Gotham
+webhookInput.Parent=f
+local logDisplay=Instance.new("TextLabel")
+logDisplay.Size=UDim2.new(0,280,0,80)
+logDisplay.Position=UDim2.new(0.5,-140,0,155)
+logDisplay.BackgroundColor3=Color3.fromRGB(20,20,20)
+logDisplay.BorderSizePixel=0
+logDisplay.Text="Events: 0\nClick 'Start Capturing' to begin"
+logDisplay.TextColor3=Color3.fromRGB(150,200,255)
+logDisplay.TextSize=9
+logDisplay.Font=Enum.Font.Gotham
+logDisplay.TextWrapped=true
+logDisplay.TextXAlignment=Enum.TextXAlignment.Left
+logDisplay.TextYAlignment=Enum.TextYAlignment.Top
+logDisplay.Parent=f
+local sendDataBtn=Instance.new("TextButton")
+sendDataBtn.Size=UDim2.new(0,135,0,35)
+sendDataBtn.Position=UDim2.new(0.5,-145,0,245)
+sendDataBtn.BackgroundColor3=Color3.fromRGB(80,120,200)
+sendDataBtn.BorderSizePixel=0
+sendDataBtn.Text="Send Captured Data"
+sendDataBtn.TextColor3=Color3.fromRGB(255,255,255)
+sendDataBtn.TextSize=11
+sendDataBtn.Font=Enum.Font.Gotham
+sendDataBtn.Parent=f
+local sendTestBtn=Instance.new("TextButton")
+sendTestBtn.Size=UDim2.new(0,135,0,35)
+sendTestBtn.Position=UDim2.new(0.5,10,0,245)
+sendTestBtn.BackgroundColor3=Color3.fromRGB(120,80,200)
+sendTestBtn.BorderSizePixel=0
+sendTestBtn.Text="Send Test"
+sendTestBtn.TextColor3=Color3.fromRGB(255,255,255)
+sendTestBtn.TextSize=11
+sendTestBtn.Font=Enum.Font.Gotham
+sendTestBtn.Parent=f
+local startCaptureBtn=Instance.new("TextButton")
+startCaptureBtn.Size=UDim2.new(0,280,0,35)
+startCaptureBtn.Position=UDim2.new(0.5,-140,0,285)
+startCaptureBtn.BackgroundColor3=Color3.fromRGB(200,100,50)
+startCaptureBtn.BorderSizePixel=0
+startCaptureBtn.Text="Start Capturing"
+startCaptureBtn.TextColor3=Color3.fromRGB(255,255,255)
+startCaptureBtn.TextSize=12
+startCaptureBtn.Font=Enum.Font.Gotham
+startCaptureBtn.Parent=f
+local function addLog(text)
+local current=logDisplay.Text or""
+local lines={}
+local hasHeader=false
+for line in string.gmatch(current,"([^\n]+)")do
+if string.find(line,"^Events:")then
+hasHeader=true
+table.insert(lines,"Events: "..eventCount)
+else
+table.insert(lines,line)
+end
+end
+if not hasHeader then
+table.insert(lines,"Events: "..eventCount)
+end
+table.insert(lines,text)
+while #lines>6 do table.remove(lines,2)end
+logDisplay.Text=table.concat(lines,"\n")
+end
+local s=Instance.new("TextLabel")
+s.Size=UDim2.new(0,280,0,35)
+s.Position=UDim2.new(0.5,-140,0,330)
+s.BackgroundTransparency=1
+s.Text="Status: Ready - Click 'Start Capturing'"
+s.TextColor3=Color3.fromRGB(200,200,200)
+s.TextSize=10
+s.Font=Enum.Font.Gotham
+s.TextWrapped=true
+s.Parent=f
+local en=false
+local WEBHOOK=""
+local capturedData={}
+local capturedTables={}
+local storageChanges={}
+local eventCount=0
+local capturing=false
+local function serializeValue(v,depth,full)
+depth=depth or 0
+full=full or false
+if depth>5 and not full then return"[Max Depth]"end
+local vType=type(v)
+if vType=="string"then
+if#v>1000 then return string.sub(v,1,1000).."[truncated]"end
+return string.format("%q",v)
+elseif vType=="number"or vType=="boolean"then
+return tostring(v)
+elseif vType=="nil"then
+return"nil"
+elseif vType=="table"then
+local tableId=tostring(v):gsub("table: ","")
+if not full and capturedTables[tableId]then
+return"[Table: "..tableId.." - see table data section]"
+end
+capturedTables[tableId]=true
+local parts={"{"}
+for k,val in pairs(v)do
+local keyStr=type(k)=="string"and string.format("[%q]",k)or"["..tostring(k).."]"
+local valStr=serializeValue(val,depth+1,full)
+table.insert(parts,keyStr.."="..valStr)
+end
+table.insert(parts,"}")
+return table.concat(parts,"")
+elseif vType=="userdata"then
+local success,result=pcall(function()
+if v.Name then
+return v.ClassName..': "'..v.Name..'"'
+elseif v.ClassName then
+return v.ClassName
+end
+end)
+if success and result then return result end
+return"[userdata]"
+else
+return"[unknown type: "..vType.."]"
+end
+end
+local function simpleJsonEncode(t)
+local parts={}
+for k,v in pairs(t)do
+local key=type(k)=="string"and string.format("%q",k)or tostring(k)
+local val
+if type(v)=="string"then
+val=string.format("%q",v)
+elseif type(v)=="number"or type(v)=="boolean"then
+val=tostring(v)
+elseif type(v)=="nil"then
+val="null"
+else
+val=string.format("%q",tostring(v))
+end
+table.insert(parts,key..":"..val)
+end
+return"{"..table.concat(parts,",").."}"
+end
+local function sendWebhookFile(dataText)
+if WEBHOOK==""then 
+sendNotification("Webhook Error","No webhook URL set!",5)
+return 
+end
+if not httpLib then
+s.Text="HTTP library not found!"
+sendNotification("Webhook Error","HTTP library not available!",5)
+task.wait(2)
+s.Text="Status: Ready"
+return
+end
+spawn(function()
+sendNotification("Sending Webhook","Attempting to send data...",3)
+local webhookUrl=WEBHOOK
+if#dataText>900 then
+local pasteUrl="https://pastebin.com/api/api_post.php"
+local pasteKey="b7b1a0b2e7e3b8b5e4e4e4e4e4e4e4e4"
+local function urlEncode(str)
+str=string.gsub(str,"\n","\\n")
+local result=""
+for i=1,#str do
+local c=string.sub(str,i,i)
+local b=string.byte(c)
+if(b>=48 and b<=57)or(b>=65 and b<=90)or(b>=97 and b<=122)or c==" "or c=="-"or c=="_"or c=="."then
+result=result..c
+else
+result=result..string.format("%%%02X",b)
+end
+end
+return result
+end
+local dataEncoded=urlEncode(dataText)
+local pasteData="api_dev_key="..pasteKey.."&api_option=paste&api_paste_code="..dataEncoded.."&api_paste_private=0"
+local headers={["Content-Type"]="application/x-www-form-urlencoded"}
+local pasteSuccess,pasteResponse=httpLib(pasteUrl,"POST",headers,pasteData)
+if pasteSuccess and pasteResponse and string.find(pasteResponse,"https://pastebin.com/")then
+local pasteLink=string.match(pasteResponse,"https://pastebin.com/[%w]+")
+if pasteLink then
+local message="Capture data: "..pasteLink
+local json=simpleJsonEncode({content=message})
+local webHeaders={["Content-Type"]="application/json"}
+local success,response,status=httpLib(webhookUrl,"POST",webHeaders,json)
+if success and(status==200 or status==204)then
+s.Text="Sent via Pastebin!"
+sendNotification("Success","Webhook sent via Pastebin!",5)
+task.wait(2)
+s.Text="Status: Ready"
+return
+else
+s.Text="Pastebin OK, webhook failed"
+sendNotification("Webhook Error","Pastebin uploaded but webhook failed",5)
+task.wait(2)
+s.Text="Status: Ready"
+return
+end
+end
+end
+s.Text="Pastebin failed, chunking..."
+sendNotification("Pastebin Failed","Falling back to chunks...",3)
+task.wait(1)
+local chunks={}
+local chunkSize=1700
+for i=1,#dataText,chunkSize do
+local chunk=string.sub(dataText,i,i+chunkSize-1)
+table.insert(chunks,chunk)
+end
+for i,chunk in ipairs(chunks)do
+local escapedChunk=string.gsub(chunk,"\\","\\\\")
+escapedChunk=string.gsub(escapedChunk,"\"","\\\"")
+escapedChunk=string.gsub(escapedChunk,"\n","\\n")
+escapedChunk=string.gsub(escapedChunk,"\r","\\r")
+escapedChunk=string.gsub(escapedChunk,"\t","\\t")
+local json=simpleJsonEncode({content="```\n"..chunk.."\n```\n*Part "..i.."/"..#chunks.."*"})
+local headers={["Content-Type"]="application/json"}
+local success,response,status=httpLib(webhookUrl,"POST",headers,json)
+if not success then
+sendNotification("Webhook Error","Failed to send chunk "..i.."/"..#chunks,5)
+end
+task.wait(0.5)
+end
+s.Text="Sent "..#chunks.." chunks!"
+sendNotification("Success","Sent "..#chunks.." chunks to webhook",5)
+task.wait(2)
+s.Text="Status: Ready"
+else
+local escaped=string.gsub(dataText,"\\","\\\\")
+escaped=string.gsub(escaped,"\"","\\\"")
+escaped=string.gsub(escaped,"\n","\\n")
+escaped=string.gsub(escaped,"\r","\\r")
+escaped=string.gsub(escaped,"\t","\\t")
+local json=simpleJsonEncode({content="```\n"..dataText.."\n```"})
+local headers={["Content-Type"]="application/json"}
+local success,response,status=httpLib(webhookUrl,"POST",headers,json)
+if success and(status==200 or status==204)then
+s.Text="Webhook sent! ("..tostring(#dataText).." bytes)"
+sendNotification("Success","Webhook sent successfully!",5)
+task.wait(2)
+s.Text="Status: Ready"
+else
+local errorMsg="Unknown error"
+if response then errorMsg=string.sub(tostring(response),1,50)end
+s.Text="Webhook failed"
+sendNotification("Webhook Error",errorMsg,5)
+task.wait(2)
+s.Text="Status: Ready"
+end
+end
+end)
+end
+local function sendNotification(title,msg,duration)
+duration=duration or 10
+game:GetService("StarterGui"):SetCore("SendNotification",{Title=title,Text=msg,Duration=duration})
+end
+local hooked={}
+local fireServerHooks={}
+local invokeServerHooks={}
+local function hookRemote(r)
+if hooked[r]then return end
+hooked[r]=true
+if r:IsA("RemoteEvent")then
+local success1,err1=pcall(function()
+r.OnClientEvent:Connect(function(...)
+local args={...}
+eventCount=eventCount+1
+local entry={}
+entry.time=os.date("%X")
+entry.remote=r.Name.." (Client)"
+entry.remotePath=r:GetFullName()
+entry.args={}
+for i,v in ipairs(args)do
+entry.args[i]=serializeValue(v,0,true)
+end
+table.insert(capturedData,entry)
+addLog("Client: "..r.Name)
+if#capturedData>5000 then
+table.remove(capturedData,1)
+end
+end)
+end)
+if not success1 then
+addLog("Failed OnClient: "..r.Name)
+end
+local success2,err2=pcall(function()
+if not fireServerHooks[r]then
+fireServerHooks[r]=r.FireServer
+r.FireServer=newcclosure(function(self,...)
+local args={...}
+eventCount=eventCount+1
+local entry={}
+entry.time=os.date("%X")
+entry.remote=self.Name.." (FireServer)"
+entry.remotePath=self:GetFullName()
+entry.args={}
+for i,v in ipairs(args)do
+entry.args[i]=serializeValue(v,0,true)
+end
+table.insert(capturedData,entry)
+addLog("Fire: "..self.Name)
+if#capturedData>5000 then
+table.remove(capturedData,1)
+end
+return fireServerHooks[r](self,...)
+end)
+end
+end)
+if not success2 then
+addLog("Failed FireServer: "..r.Name)
+end
+elseif r:IsA("RemoteFunction")then
+local success1,err1=pcall(function()
+local originalInvoke=r.OnClientInvoke
+r.OnClientInvoke=function(...)
+local args={...}
+eventCount=eventCount+1
+local entry={}
+entry.time=os.date("%X")
+entry.remote=r.Name.." (Invoke)"
+entry.remotePath=r:GetFullName()
+entry.args={}
+for i,v in ipairs(args)do
+entry.args[i]=serializeValue(v,0,true)
+end
+table.insert(capturedData,entry)
+addLog("Invoke: "..r.Name)
+if#capturedData>5000 then
+table.remove(capturedData,1)
+end
+if originalInvoke then
+return originalInvoke(...)
+end
+return nil
+end
+end)
+if not success1 then
+addLog("Failed OnClientInvoke: "..r.Name)
+end
+local success2,err2=pcall(function()
+if not invokeServerHooks[r]then
+invokeServerHooks[r]=r.InvokeServer
+r.InvokeServer=newcclosure(function(self,...)
+local args={...}
+eventCount=eventCount+1
+local entry={}
+entry.time=os.date("%X")
+entry.remote=self.Name.." (InvokeServer)"
+entry.remotePath=self:GetFullName()
+entry.args={}
+for i,v in ipairs(args)do
+entry.args[i]=serializeValue(v,0,true)
+end
+table.insert(capturedData,entry)
+addLog("InvokeS: "..self.Name)
+if#capturedData>5000 then
+table.remove(capturedData,1)
+end
+return invokeServerHooks[r](self,...)
+end)
+end
+end)
+if not success2 then
+addLog("Failed InvokeServer: "..r.Name)
+end
+end
+end
+local function captureStorageChanges()
+RS.ChildAdded:Connect(function(child)
+local entry={}
+entry.time=os.date("%X")
+entry.type="ChildAdded"
+entry.child=child.Name
+entry.class=child.ClassName
+entry.path=child:GetFullName()
+table.insert(storageChanges,entry)
+if#storageChanges>1000 then
+table.remove(storageChanges,1)
+end
+end)
+RS.ChildRemoved:Connect(function(child)
+local entry={}
+entry.time=os.date("%X")
+entry.type="ChildRemoved"
+entry.child=child.Name
+entry.class=child.ClassName
+entry.path=child:GetFullName()
+table.insert(storageChanges,entry)
+if#storageChanges>1000 then
+table.remove(storageChanges,1)
+end
+end)
+RS.DescendantAdded:Connect(function(desc)
+if desc~=RS then
+local entry={}
+entry.time=os.date("%X")
+entry.type="DescendantAdded"
+entry.name=desc.Name
+entry.class=desc.ClassName
+entry.path=desc:GetFullName()
+table.insert(storageChanges,entry)
+if#storageChanges>1000 then
+table.remove(storageChanges,1)
+end
+end
+end)
+end
+local function formatDataForFile()
+local lines={}
+table.insert(lines,"=== BUBBLEGUM SIMULATOR DATA CAPTURE ===")
+table.insert(lines,"Player: "..p.Name)
+table.insert(lines,"Time: "..os.date("%Y-%m-%d %X"))
+table.insert(lines,"Events Captured: "..eventCount)
+table.insert(lines,"Storage Changes: "..(#storageChanges))
+table.insert(lines,"")
+table.insert(lines,"=== REMOTE EVENTS ===")
+table.insert(lines,"")
+for i,entry in ipairs(capturedData)do
+table.insert(lines,"--- Event #"..i.." ["..entry.time.."] ---")
+table.insert(lines,"Remote: "..entry.remote)
+table.insert(lines,"Path: "..entry.remotePath)
+table.insert(lines,"Args:")
+for j,arg in ipairs(entry.args)do
+table.insert(lines,"  ["..j.."] = "..arg)
+end
+table.insert(lines,"")
+end
+table.insert(lines,"=== STORAGE CHANGES ===")
+table.insert(lines,"")
+for i,entry in ipairs(storageChanges)do
+table.insert(lines,"--- Change #"..i.." ["..entry.time.."] ---")
+table.insert(lines,"Type: "..entry.type)
+table.insert(lines,"Class: "..entry.class)
+table.insert(lines,"Name: "..(entry.child or entry.name or"N/A"))
+table.insert(lines,"Path: "..entry.path)
+table.insert(lines,"")
+end
+return table.concat(lines,"\n")
+end
+local function scanForRemotes()
+local count=0
+local remoteNames={}
+local function scanInstance(inst)
+for _,v in pairs(inst:GetDescendants())do
+if v:IsA("RemoteEvent")or v:IsA("RemoteFunction")then
+hookRemote(v)
+count=count+1
+table.insert(remoteNames,v.Name.." ("..v.ClassName..")")
+end
+end
+end
+scanInstance(RS)
+scanInstance(WS)
+scanInstance(SS)
+scanInstance(P)
+scanInstance(game:GetService("StarterPack"))
+scanInstance(game:GetService("StarterPlayer"))
+scanInstance(game:GetService("ReplicatedFirst"))
+if count>0 then
+addLog("Remotes found:")
+for i=1,math.min(5,#remoteNames)do
+addLog("  - "..remoteNames[i])
+end
+if#remoteNames>5 then
+addLog("  ... and "..(#remoteNames-5).." more")
+end
+end
+return count
+end
+local function startCapture()
+if capturing then return end
+capturing=true
+s.Text="Scanning for remotes..."
+addLog("Starting scan...")
+addLog("HTTP Lib: "..httpLibName)
+sendNotification("Starting","Scanning for remotes...",3)
+spawn(function()
+task.wait(1)
+local count=scanForRemotes()
+captureStorageChanges()
+s.Text="Hooked "..count.." Remotes - Ready!"
+addLog("Found "..count.." remotes")
+if httpLib then
+addLog("HTTP: "..httpLibName.." OK")
+else
+addLog("HTTP: NOT FOUND")
+end
+if count==0 then
+addLog("NO REMOTES - try hatching")
+sendNotification("Warning","No remotes found! Try hatching an egg.",5)
+else
+sendNotification("Ready","Data capture active! Events: "..count,5)
+end
+end)
+end
+RS.DescendantAdded:Connect(function(desc)
+if(desc:IsA("RemoteEvent")or desc:IsA("RemoteFunction"))and not hooked[desc]then hookRemote(desc)end
+end)
+WS.DescendantAdded:Connect(function(desc)
+if(desc:IsA("RemoteEvent")or desc:IsA("RemoteFunction"))and not hooked[desc]then hookRemote(desc)end
+end)
+game.DescendantAdded:Connect(function(desc)
+if(desc:IsA("RemoteEvent")or desc:IsA("RemoteFunction"))and not hooked[desc]and(desc.Parent==RS or desc.Parent==WS or string.find(desc:GetFullName(),"Replicated"))then hookRemote(desc)end
+end)
+b1.Activated:Connect(function()
+en=not en
+if en then
+b1.Text="Auto Hatch: ON"
+b1.BackgroundColor3=Color3.fromRGB(50,200,50)
+s.Text="Auto Hatch: Active"
+spawn(function()
+local VIM=game:GetService("VirtualInputManager")
+while en do
+VIM:SendKeyEvent(true,Enum.KeyCode.E,false,game)
+task.wait(0.05)
+VIM:SendKeyEvent(false,Enum.KeyCode.E,false,game)
+task.wait(0.2)
+end
+end)
+else
+b1.Text="Auto Hatch: OFF"
+b1.BackgroundColor3=Color3.fromRGB(60,60,60)
+s.Text="Auto Hatch: Stopped"
+end
+end)
+webhookInput.FocusLost:Connect(function()
+WEBHOOK=webhookInput.Text
+WEBHOOK=string.gsub(WEBHOOK,"^%s*(.-)%s*$","%1")
+if WEBHOOK~=""then
+s.Text="Webhook URL saved! ("..string.sub(WEBHOOK,1,30).."...)"
+sendNotification("Saved","Webhook URL saved!",3)
+task.wait(2)
+if capturing then
+s.Text="Status: Ready"
+else
+s.Text="Status: Ready - Click 'Start Capturing'"
+end
+else
+s.Text="Webhook URL cleared"
+end
+end)
+toggleBtn.Activated:Connect(function()
+f.Visible=not f.Visible
+if f.Visible then
+toggleBtn.Text="GUI"
+toggleBtn.BackgroundColor3=Color3.fromRGB(60,120,200)
+else
+toggleBtn.Text=">>>"
+toggleBtn.BackgroundColor3=Color3.fromRGB(100,100,100)
+end
+end)
+sendDataBtn.Activated:Connect(function()
+WEBHOOK=webhookInput.Text
+WEBHOOK=string.gsub(WEBHOOK,"^%s*(.-)%s*$","%1")
+if WEBHOOK==""then
+sendNotification("Error","No webhook URL set!",5)
+s.Text="Error: No webhook URL"
+task.wait(2)
+if capturing then
+s.Text="Status: Ready"
+else
+s.Text="Status: Ready - Click 'Start Capturing'"
+end
+return
+end
+if#capturedData==0 and#storageChanges==0 then
+sendNotification("Error","No data captured yet! Capture must be active.",5)
+s.Text="No data to send"
+task.wait(2)
+if capturing then
+s.Text="Status: Ready"
+else
+s.Text="Status: Ready - Click 'Start Capturing'"
+end
+return
+end
+s.Text="Formatting data..."
+local dataText=formatDataForFile()
+s.Text="Sending webhook..."
+sendWebhookFile(dataText)
+sendNotification("Sending","Sending captured data to webhook...",3)
+end)
+sendTestBtn.Activated:Connect(function()
+WEBHOOK=webhookInput.Text
+WEBHOOK=string.gsub(WEBHOOK,"^%s*(.-)%s*$","%1")
+if WEBHOOK==""then
+sendNotification("Error","No webhook URL set!",5)
+s.Text="Error: No webhook URL"
+task.wait(2)
+if capturing then
+s.Text="Status: Ready"
+else
+s.Text="Status: Ready - Click 'Start Capturing'"
+end
+return
+end
+if not httpLib then
+sendNotification("Error","HTTP library not available!",5)
+s.Text="Error: No HTTP library ("..httpLibName..")"
+addLog("HTTP Lib: "..httpLibName)
+task.wait(2)
+if capturing then
+s.Text="Status: Ready"
+else
+s.Text="Status: Ready - Click 'Start Capturing'"
+end
+return
+end
+s.Text="Sending test..."
+addLog("Test: "..httpLibName)
+spawn(function()
+sendNotification("Sending","Sending test message...",3)
+local webhookUrl=WEBHOOK
+local json=simpleJsonEncode({content="Test message from Bubblegum Script! HTTP: "..httpLibName})
+local headers={["Content-Type"]="application/json"}
+s.Text="Calling HTTP lib..."
+local success,response,status=httpLib(webhookUrl,"POST",headers,json)
+s.Text="Response received..."
+if success and(status==200 or status==204)then
+s.Text="Test sent! (Status: "..tostring(status)..")"
+addLog("Test: SUCCESS")
+sendNotification("Success","Test message sent! Status: "..tostring(status),5)
+task.wait(2)
+if capturing then
+s.Text="Status: Ready"
+else
+s.Text="Status: Ready - Click 'Start Capturing'"
+end
+else
+local errorMsg=httpErrorMsg or"Unknown"
+if response and response~=""then 
+errorMsg=errorMsg.." | "..string.sub(tostring(response),1,40)
+end
+s.Text="Test failed: "..errorMsg
+addLog("Test FAILED: "..errorMsg)
+sendNotification("Error","Test failed: "..errorMsg,8)
+task.wait(2)
+if capturing then
+s.Text="Status: Ready"
+else
+s.Text="Status: Ready - Click 'Start Capturing'"
+end
+end
+end)
+end)
+startCaptureBtn.Activated:Connect(function()
+startCapture()
+startCaptureBtn.Text="Capturing Active"
+startCaptureBtn.BackgroundColor3=Color3.fromRGB(50,200,50)
+end)
+game:GetService("StarterGui"):SetCore("SendNotification",{Title="Loading",Text="Script initializing...",Duration=3})
