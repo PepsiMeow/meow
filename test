@@ -162,6 +162,16 @@ t.TextColor3=Color3.fromRGB(255,255,255)
 t.TextSize=18
 t.Font=Enum.Font.GothamBold
 t.Parent=f
+local versionLabel=Instance.new("TextLabel")
+versionLabel.Size=UDim2.new(0,40,0,20)
+versionLabel.Position=UDim2.new(1,-45,0,2)
+versionLabel.BackgroundTransparency=1
+versionLabel.Text="v1"
+versionLabel.TextColor3=Color3.fromRGB(150,150,150)
+versionLabel.TextSize=10
+versionLabel.Font=Enum.Font.Gotham
+versionLabel.TextXAlignment=Enum.TextXAlignment.Right
+versionLabel.Parent=f
 local b1=Instance.new("TextButton")
 b1.Size=UDim2.new(0,280,0,35)
 b1.Position=UDim2.new(0.5,-140,0,50)
@@ -444,62 +454,34 @@ duration=duration or 10
 game:GetService("StarterGui"):SetCore("SendNotification",{Title=title,Text=msg,Duration=duration})
 end
 local hooked={}
-local fireServerHooks={}
-local invokeServerHooks={}
 local function hookRemote(r)
 if hooked[r]then return end
 hooked[r]=true
 if r:IsA("RemoteEvent")then
-local success1,err1=pcall(function()
+local success,err=pcall(function()
 r.OnClientEvent:Connect(function(...)
 local args={...}
 eventCount=eventCount+1
 local entry={}
 entry.time=os.date("%X")
-entry.remote=r.Name.." (Client)"
+entry.remote=r.Name
 entry.remotePath=r:GetFullName()
 entry.args={}
 for i,v in ipairs(args)do
 entry.args[i]=serializeValue(v,0,true)
 end
 table.insert(capturedData,entry)
-addLog("Client: "..r.Name)
+addLog("Event: "..r.Name)
 if#capturedData>5000 then
 table.remove(capturedData,1)
 end
 end)
 end)
-if not success1 then
-addLog("Failed OnClient: "..r.Name)
-end
-local success2,err2=pcall(function()
-if not fireServerHooks[r]then
-fireServerHooks[r]=r.FireServer
-r.FireServer=newcclosure(function(self,...)
-local args={...}
-eventCount=eventCount+1
-local entry={}
-entry.time=os.date("%X")
-entry.remote=self.Name.." (FireServer)"
-entry.remotePath=self:GetFullName()
-entry.args={}
-for i,v in ipairs(args)do
-entry.args[i]=serializeValue(v,0,true)
-end
-table.insert(capturedData,entry)
-addLog("Fire: "..self.Name)
-if#capturedData>5000 then
-table.remove(capturedData,1)
-end
-return fireServerHooks[r](self,...)
-end)
-end
-end)
-if not success2 then
-addLog("Failed FireServer: "..r.Name)
+if not success then
+addLog("Hook failed: "..r.Name)
 end
 elseif r:IsA("RemoteFunction")then
-local success1,err1=pcall(function()
+local success,err=pcall(function()
 local originalInvoke=r.OnClientInvoke
 r.OnClientInvoke=function(...)
 local args={...}
@@ -523,34 +505,8 @@ end
 return nil
 end
 end)
-if not success1 then
-addLog("Failed OnClientInvoke: "..r.Name)
-end
-local success2,err2=pcall(function()
-if not invokeServerHooks[r]then
-invokeServerHooks[r]=r.InvokeServer
-r.InvokeServer=newcclosure(function(self,...)
-local args={...}
-eventCount=eventCount+1
-local entry={}
-entry.time=os.date("%X")
-entry.remote=self.Name.." (InvokeServer)"
-entry.remotePath=self:GetFullName()
-entry.args={}
-for i,v in ipairs(args)do
-entry.args[i]=serializeValue(v,0,true)
-end
-table.insert(capturedData,entry)
-addLog("InvokeS: "..self.Name)
-if#capturedData>5000 then
-table.remove(capturedData,1)
-end
-return invokeServerHooks[r](self,...)
-end)
-end
-end)
-if not success2 then
-addLog("Failed InvokeServer: "..r.Name)
+if not success then
+addLog("Hook failed: "..r.Name)
 end
 end
 end
@@ -770,11 +726,13 @@ sendWebhookFile(dataText)
 sendNotification("Sending","Sending captured data to webhook...",3)
 end)
 sendTestBtn.Activated:Connect(function()
+sendNotification("Test","Starting test...",2)
 WEBHOOK=webhookInput.Text
 WEBHOOK=string.gsub(WEBHOOK,"^%s*(.-)%s*$","%1")
 if WEBHOOK==""then
 sendNotification("Error","No webhook URL set!",5)
 s.Text="Error: No webhook URL"
+addLog("Test: No URL")
 task.wait(2)
 if capturing then
 s.Text="Status: Ready"
@@ -785,7 +743,7 @@ return
 end
 if not httpLib then
 sendNotification("Error","HTTP library not available!",5)
-s.Text="Error: No HTTP library ("..httpLibName..")"
+s.Text="Error: No HTTP library"
 addLog("HTTP Lib: "..httpLibName)
 task.wait(2)
 if capturing then
@@ -796,19 +754,21 @@ end
 return
 end
 s.Text="Sending test..."
-addLog("Test: "..httpLibName)
+addLog("Test using: "..httpLibName)
 spawn(function()
 sendNotification("Sending","Sending test message...",3)
+task.wait(0.5)
 local webhookUrl=WEBHOOK
-local json=simpleJsonEncode({content="Test message from Bubblegum Script! HTTP: "..httpLibName})
+local testContent="Test from Bubblegum Script v1 - "..os.date("%X")
+local json=simpleJsonEncode({content=testContent})
 local headers={["Content-Type"]="application/json"}
-s.Text="Calling HTTP lib..."
+s.Text="HTTP call..."
+addLog("Calling HTTP...")
 local success,response,status=httpLib(webhookUrl,"POST",headers,json)
-s.Text="Response received..."
-if success and(status==200 or status==204)then
-s.Text="Test sent! (Status: "..tostring(status)..")"
-addLog("Test: SUCCESS")
-sendNotification("Success","Test message sent! Status: "..tostring(status),5)
+if success and status and(status==200 or status==204)then
+s.Text="Test sent! ("..tostring(status)..")"
+addLog("SUCCESS: "..tostring(status))
+sendNotification("Success","Test sent! Check Discord.",5)
 task.wait(2)
 if capturing then
 s.Text="Status: Ready"
@@ -816,14 +776,16 @@ else
 s.Text="Status: Ready - Click 'Start Capturing'"
 end
 else
-local errorMsg=httpErrorMsg or"Unknown"
-if response and response~=""then 
-errorMsg=errorMsg.." | "..string.sub(tostring(response),1,40)
+local errorMsg="Failed"
+if httpErrorMsg and httpErrorMsg~=""then
+errorMsg=httpErrorMsg
+elseif response then
+errorMsg=string.sub(tostring(response),1,50)
 end
 s.Text="Test failed: "..errorMsg
-addLog("Test FAILED: "..errorMsg)
+addLog("FAILED: "..errorMsg)
 sendNotification("Error","Test failed: "..errorMsg,8)
-task.wait(2)
+task.wait(3)
 if capturing then
 s.Text="Status: Ready"
 else
