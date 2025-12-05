@@ -22,8 +22,8 @@ local toggleCorner=Instance.new("UICorner")
 toggleCorner.CornerRadius=UDim.new(0,6)
 toggleCorner.Parent=toggleBtn
 local f=Instance.new("Frame")
-f.Size=UDim2.new(0,320,0,280)
-f.Position=UDim2.new(0.5,-160,0.5,-140)
+f.Size=UDim2.new(0,320,0,300)
+f.Position=UDim2.new(0.5,-160,0.5,-150)
 f.BackgroundColor3=Color3.fromRGB(30,30,30)
 f.BorderSizePixel=0
 f.Parent=g
@@ -60,7 +60,7 @@ webhookInput.Position=UDim2.new(0.5,-140,0,115)
 webhookInput.BackgroundColor3=Color3.fromRGB(40,40,40)
 webhookInput.BorderSizePixel=0
 webhookInput.Text=""
-webhookInput.PlaceholderText="Enter Discord webhook URL (uses proxy)"
+webhookInput.PlaceholderText="Discord webhook (auto-tries proxies)"
 webhookInput.TextColor3=Color3.fromRGB(255,255,255)
 webhookInput.TextSize=10
 webhookInput.Font=Enum.Font.Gotham
@@ -85,9 +85,28 @@ secretInput.TextColor3=Color3.fromRGB(255,255,255)
 secretInput.TextSize=10
 secretInput.Font=Enum.Font.Gotham
 secretInput.Parent=f
+local logDisplay=Instance.new("TextLabel")
+logDisplay.Size=UDim2.new(0,280,0,30)
+logDisplay.Position=UDim2.new(0.5,-140,0,215)
+logDisplay.BackgroundColor3=Color3.fromRGB(20,20,20)
+logDisplay.BorderSizePixel=0
+logDisplay.Text="Recent hatches will appear here"
+logDisplay.TextColor3=Color3.fromRGB(150,200,255)
+logDisplay.TextSize=9
+logDisplay.Font=Enum.Font.Gotham
+logDisplay.TextWrapped=true
+logDisplay.TextXAlignment=Enum.TextXAlignment.Left
+logDisplay.TextYAlignment=Enum.TextYAlignment.Top
+logDisplay.Parent=f
+local recentLogs={}
+local function addLog(text)
+table.insert(recentLogs,text)
+while #recentLogs>3 do table.remove(recentLogs,1)end
+logDisplay.Text=table.concat(recentLogs,"\n")
+end
 local s=Instance.new("TextLabel")
-s.Size=UDim2.new(0,280,0,50)
-s.Position=UDim2.new(0.5,-140,0,215)
+s.Size=UDim2.new(0,280,0,35)
+s.Position=UDim2.new(0.5,-140,0,250)
 s.BackgroundTransparency=1
 s.Text="Status: Ready"
 s.TextColor3=Color3.fromRGB(200,200,200)
@@ -98,6 +117,21 @@ s.Parent=f
 local en=false
 local WEBHOOK=""
 local secretPets={"snowball"}
+local recentNotifications={}
+local function wasRecentlyNotified(petName,playerName)
+local now=tick()
+local key=playerName.."|"..petName
+for i,entry in ipairs(recentNotifications)do
+if entry.key==key and(now-entry.time)<1.5 then
+return true
+end
+end
+table.insert(recentNotifications,{key=key,time=now})
+while #recentNotifications>10 do
+table.remove(recentNotifications,1)
+end
+return false
+end
 local function updateSecretPets()
 local text=secretInput.Text
 if text and text~=""then
@@ -117,18 +151,53 @@ end)
 local function sendWebhook(msg)
 if WEBHOOK==""then return end
 local webhookUrl=WEBHOOK
+local proxies={"webhook.lewisakura.dev","webhook.lewisakura.moe","webhook.whitehill.group"}
+local success=false
+local lastErr=""
 if string.find(webhookUrl,"discord%.com")then
-webhookUrl=string.gsub(webhookUrl,"discord%.com","webhook.lewisakura.dev")
+for _,proxy in ipairs(proxies)do
+local testUrl=string.gsub(webhookUrl,"discord%.com",proxy)
+local testSuccess,testErr=pcall(function()
+HS:PostAsync(testUrl,HS:JSONEncode({content=msg}),Enum.HttpContentType.ApplicationJson)
+end)
+if testSuccess then
+success=true
+s.Text="Webhook sent! (via "..proxy..")"
+task.wait(1)
+s.Text="Status: Ready"
+break
+else
+lastErr=testErr
 end
-local success,err=pcall(function()
+end
+if not success then
+local directSuccess,directErr=pcall(function()
 HS:PostAsync(webhookUrl,HS:JSONEncode({content=msg}),Enum.HttpContentType.ApplicationJson)
 end)
-if success then
+if directSuccess then
+success=true
+s.Text="Webhook sent! (direct)"
+task.wait(1)
+s.Text="Status: Ready"
+else
+lastErr=directErr
+end
+end
+else
+local directSuccess,directErr=pcall(function()
+HS:PostAsync(webhookUrl,HS:JSONEncode({content=msg}),Enum.HttpContentType.ApplicationJson)
+end)
+if directSuccess then
+success=true
 s.Text="Webhook sent!"
 task.wait(1)
 s.Text="Status: Ready"
 else
-s.Text="Webhook failed: "..tostring(err)
+lastErr=directErr
+end
+end
+if not success then
+s.Text="Webhook failed (all methods blocked)"
 task.wait(2)
 s.Text="Status: Ready"
 end
@@ -155,17 +224,21 @@ petMatch=string.gsub(petMatch,"^%s*(.-)%s*$","%1")
 petMatch=string.gsub(petMatch,"%s*%(%d+%.?%d*%%%)%s*$","")
 petMatch=string.gsub(petMatch,"^%s*(.-)%s*$","%1")
 local petLower=string.lower(petMatch)
+if not wasRecentlyNotified(petMatch,playerName)then
 local isSecret=false
 s.Text="Hatched: "..petMatch
+addLog("Hatched: "..petMatch)
 sendNotification("Pet Hatched!",playerName.." hatched "..petMatch,5)
 for _,secret in ipairs(secretPets)do
 if string.find(petLower,secret)then
 isSecret=true
 local msg=playerName.." hatched a "..petMatch.."!"
 s.Text="SECRET: "..petMatch
+addLog("⭐ SECRET: "..petMatch)
 sendNotification("SECRET PET!",msg,10)
-sendWebhook(msg)
+spawn(function()sendWebhook(msg)end)
 break
+end
 end
 end
 end
