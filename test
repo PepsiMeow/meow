@@ -1,5 +1,7 @@
 local P=game:GetService("Players")
 local RS=game:GetService("ReplicatedStorage")
+local WS=game:GetService("Workspace")
+local SS=game:GetService("StarterGui")
 local p=P.LocalPlayer
 wait(1)
 local httpLib=nil
@@ -181,18 +183,68 @@ end
 return"{"..table.concat(parts,",").."}"
 end
 local function sendWebhookFile(dataText)
-if WEBHOOK==""then return end
+if WEBHOOK==""then 
+sendNotification("Webhook Error","No webhook URL set!",5)
+return 
+end
 if not httpLib then
 s.Text="HTTP library not found!"
+sendNotification("Webhook Error","HTTP library not available!",5)
 task.wait(2)
 s.Text="Status: Ready"
 return
 end
 spawn(function()
+sendNotification("Sending Webhook","Attempting to send data...",3)
 local webhookUrl=WEBHOOK
-if#dataText>1800 then
+if#dataText>900 then
+local pasteUrl="https://pastebin.com/api/api_post.php"
+local pasteKey="b7b1a0b2e7e3b8b5e4e4e4e4e4e4e4e4"
+local function urlEncode(str)
+str=string.gsub(str,"\n","\\n")
+local result=""
+for i=1,#str do
+local c=string.sub(str,i,i)
+local b=string.byte(c)
+if(b>=48 and b<=57)or(b>=65 and b<=90)or(b>=97 and b<=122)or c==" "or c=="-"or c=="_"or c=="."then
+result=result..c
+else
+result=result..string.format("%%%02X",b)
+end
+end
+return result
+end
+local dataEncoded=urlEncode(dataText)
+local pasteData="api_dev_key="..pasteKey.."&api_option=paste&api_paste_code="..dataEncoded.."&api_paste_private=0"
+local headers={["Content-Type"]="application/x-www-form-urlencoded"}
+local pasteSuccess,pasteResponse=httpLib(pasteUrl,"POST",headers,pasteData)
+if pasteSuccess and pasteResponse and string.find(pasteResponse,"https://pastebin.com/")then
+local pasteLink=string.match(pasteResponse,"https://pastebin.com/[%w]+")
+if pasteLink then
+local message="Capture data: "..pasteLink
+local json=simpleJsonEncode({content=message})
+local webHeaders={["Content-Type"]="application/json"}
+local success,response,status=httpLib(webhookUrl,"POST",webHeaders,json)
+if success and(status==200 or status==204)then
+s.Text="Sent via Pastebin!"
+sendNotification("Success","Webhook sent via Pastebin!",5)
+task.wait(2)
+s.Text="Status: Ready"
+return
+else
+s.Text="Pastebin OK, webhook failed"
+sendNotification("Webhook Error","Pastebin uploaded but webhook failed",5)
+task.wait(2)
+s.Text="Status: Ready"
+return
+end
+end
+end
+s.Text="Pastebin failed, chunking..."
+sendNotification("Pastebin Failed","Falling back to chunks...",3)
+task.wait(1)
 local chunks={}
-local chunkSize=1800
+local chunkSize=1700
 for i=1,#dataText,chunkSize do
 local chunk=string.sub(dataText,i,i+chunkSize-1)
 table.insert(chunks,chunk)
@@ -205,10 +257,14 @@ escapedChunk=string.gsub(escapedChunk,"\r","\\r")
 escapedChunk=string.gsub(escapedChunk,"\t","\\t")
 local json=simpleJsonEncode({content="```\n"..chunk.."\n```\n*Part "..i.."/"..#chunks.."*"})
 local headers={["Content-Type"]="application/json"}
-httpLib(webhookUrl,"POST",headers,json)
+local success,response,status=httpLib(webhookUrl,"POST",headers,json)
+if not success then
+sendNotification("Webhook Error","Failed to send chunk "..i.."/"..#chunks,5)
+end
 task.wait(0.5)
 end
 s.Text="Sent "..#chunks.." chunks!"
+sendNotification("Success","Sent "..#chunks.." chunks to webhook",5)
 task.wait(2)
 s.Text="Status: Ready"
 else
@@ -222,10 +278,14 @@ local headers={["Content-Type"]="application/json"}
 local success,response,status=httpLib(webhookUrl,"POST",headers,json)
 if success and(status==200 or status==204)then
 s.Text="Webhook sent! ("..tostring(#dataText).." bytes)"
+sendNotification("Success","Webhook sent successfully!",5)
 task.wait(2)
 s.Text="Status: Ready"
 else
+local errorMsg="Unknown error"
+if response then errorMsg=string.sub(tostring(response),1,50)end
 s.Text="Webhook failed"
+sendNotification("Webhook Error",errorMsg,5)
 task.wait(2)
 s.Text="Status: Ready"
 end
@@ -241,7 +301,8 @@ local function hookRemote(r)
 if hooked[r]then return end
 hooked[r]=true
 if r:IsA("RemoteEvent")then
-r.OnClientEvent:Connect(function(...)
+local connection
+connection=r.OnClientEvent:Connect(function(...)
 local args={...}
 eventCount=eventCount+1
 lastCaptureTime=tick()
@@ -254,12 +315,13 @@ for i,v in ipairs(args)do
 entry.args[i]=serializeValue(v)
 end
 table.insert(capturedData,entry)
-addLog("Event: "..r.Name.." (#"..eventCount..")")
+addLog("Event: "..r.Name)
 if#capturedData>1000 then
 table.remove(capturedData,1)
 end
 end)
 elseif r:IsA("RemoteFunction")then
+local originalInvoke=r.OnClientInvoke
 r.OnClientInvoke=function(...)
 local args={...}
 eventCount=eventCount+1
@@ -273,9 +335,12 @@ for i,v in ipairs(args)do
 entry.args[i]=serializeValue(v)
 end
 table.insert(capturedData,entry)
-addLog("Invoke: "..r.Name.." (#"..eventCount..")")
+addLog("Invoke: "..r.Name)
 if#capturedData>1000 then
 table.remove(capturedData,1)
+end
+if originalInvoke then
+return originalInvoke(...)
 end
 return nil
 end
@@ -302,22 +367,41 @@ table.insert(lines,"")
 end
 return table.concat(lines,"\n")
 end
-spawn(function()
-wait(2)
+local function scanForRemotes()
 local count=0
-for _,v in pairs(RS:GetDescendants())do
-if v:IsA("RemoteEvent")or v:IsA("RemoteFunction")then 
+local function scanInstance(inst)
+for _,v in pairs(inst:GetDescendants())do
+if v:IsA("RemoteEvent")or v:IsA("RemoteFunction")then
 hookRemote(v)
 count=count+1
 end
 end
+end
+scanInstance(RS)
+scanInstance(WS)
+scanInstance(SS)
+scanInstance(P)
+scanInstance(game:GetService("StarterPack"))
+scanInstance(game:GetService("StarterPlayer"))
+return count
+end
+spawn(function()
+wait(2)
+local count=scanForRemotes()
 s.Text="Hooked "..count.." Remotes - Capturing..."
-end)
-RS.ChildAdded:Connect(function(child)
-if child:IsA("RemoteEvent")or child:IsA("RemoteFunction")then hookRemote(child)end
+addLog("Found "..count.." remotes")
+if count==0 then
+sendNotification("Warning","No remotes found! Try hatching an egg.",5)
+end
 end)
 RS.DescendantAdded:Connect(function(desc)
 if(desc:IsA("RemoteEvent")or desc:IsA("RemoteFunction"))and not hooked[desc]then hookRemote(desc)end
+end)
+WS.DescendantAdded:Connect(function(desc)
+if(desc:IsA("RemoteEvent")or desc:IsA("RemoteFunction"))and not hooked[desc]then hookRemote(desc)end
+end)
+game.DescendantAdded:Connect(function(desc)
+if(desc:IsA("RemoteEvent")or desc:IsA("RemoteFunction"))and not hooked[desc]and(desc.Parent==RS or desc.Parent==WS or string.find(desc:GetFullName(),"Replicated"))then hookRemote(desc)end
 end)
 spawn(function()
 while true do
