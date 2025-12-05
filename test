@@ -117,18 +117,24 @@ s.Parent=f
 local en=false
 local WEBHOOK=""
 local secretPets={"snowball"}
-local recentNotifications={}
-local function wasRecentlyNotified(petName,playerName)
-local now=tick()
-local key=playerName.."|"..petName
-for i,entry in ipairs(recentNotifications)do
-if entry.key==key and(now-entry.time)<1.5 then
+local processedMessages={}
+local function hasProcessedMessage(messageContent)
+if processedMessages[messageContent]then
 return true
 end
+processedMessages[messageContent]=true
+local count=0
+for _ in pairs(processedMessages)do
+count=count+1
 end
-table.insert(recentNotifications,{key=key,time=now})
-while #recentNotifications>10 do
-table.remove(recentNotifications,1)
+if count>50 then
+local keys={}
+for k in pairs(processedMessages)do
+table.insert(keys,k)
+end
+for i=1,25 do
+processedMessages[keys[i]]=nil
+end
 end
 return false
 end
@@ -150,63 +156,59 @@ s.Text="Status: Ready"
 end)
 local function sendWebhook(msg)
 if WEBHOOK==""then return end
+spawn(function()
 local webhookUrl=WEBHOOK
 local proxies={"webhook.lewisakura.dev","webhook.lewisakura.moe","webhook.whitehill.group"}
 local success=false
-local lastErr=""
 if string.find(webhookUrl,"discord%.com")then
 for _,proxy in ipairs(proxies)do
 local testUrl=string.gsub(webhookUrl,"discord%.com",proxy)
-local testSuccess,testErr=pcall(function()
+local testSuccess=pcall(function()
 HS:PostAsync(testUrl,HS:JSONEncode({content=msg}),Enum.HttpContentType.ApplicationJson)
 end)
 if testSuccess then
 success=true
-s.Text="Webhook sent! (via "..proxy..")"
-task.wait(1)
-s.Text="Status: Ready"
-break
-else
-lastErr=testErr
-end
-end
-if not success then
-local directSuccess,directErr=pcall(function()
-HS:PostAsync(webhookUrl,HS:JSONEncode({content=msg}),Enum.HttpContentType.ApplicationJson)
-end)
-if directSuccess then
-success=true
-s.Text="Webhook sent! (direct)"
-task.wait(1)
-s.Text="Status: Ready"
-else
-lastErr=directErr
-end
-end
-else
-local directSuccess,directErr=pcall(function()
-HS:PostAsync(webhookUrl,HS:JSONEncode({content=msg}),Enum.HttpContentType.ApplicationJson)
-end)
-if directSuccess then
-success=true
-s.Text="Webhook sent!"
-task.wait(1)
-s.Text="Status: Ready"
-else
-lastErr=directErr
-end
-end
-if not success then
-s.Text="Webhook failed (all methods blocked)"
+if s then s.Text="Webhook sent! (via "..proxy..")"end
 task.wait(2)
+if s then s.Text="Status: Ready"end
+break
+end
+end
+if not success then
+local directSuccess=pcall(function()
+HS:PostAsync(webhookUrl,HS:JSONEncode({content=msg}),Enum.HttpContentType.ApplicationJson)
+end)
+if directSuccess then
+success=true
+if s then s.Text="Webhook sent! (direct)"end
+task.wait(2)
+if s then s.Text="Status: Ready"end
+end
+end
+else
+local directSuccess=pcall(function()
+HS:PostAsync(webhookUrl,HS:JSONEncode({content=msg}),Enum.HttpContentType.ApplicationJson)
+end)
+if directSuccess then
+success=true
+if s then s.Text="Webhook sent!"end
+task.wait(2)
+if s then s.Text="Status: Ready"end
+end
+end
+if not success and s then
+s.Text="Webhooks blocked"
+task.wait(1)
 s.Text="Status: Ready"
 end
+end)
 end
 local function sendNotification(title,msg,duration)
 duration=duration or 10
 game:GetService("StarterGui"):SetCore("SendNotification",{Title=title,Text=msg,Duration=duration})
 end
 local hooked={}
+local processing={}
 local function hookRemote(r)
 if hooked[r]then return end
 hooked[r]=true
@@ -215,6 +217,13 @@ r.OnClientEvent:Connect(function(...)
 local args={...}
 if args[2]=="ServerHatch"and type(args[1])=="string"then
 local message=args[1]
+if processing[message]then return end
+if hasProcessedMessage(message)then return end
+processing[message]=true
+spawn(function()
+task.wait(0.5)
+processing[message]=nil
+end)
 local playerName=p.Name
 local nameMatch=string.match(message,"<font color=\"#[^\"]+\">([^<]+)</font> just hatched")
 if nameMatch and nameMatch==playerName then
@@ -224,7 +233,6 @@ petMatch=string.gsub(petMatch,"^%s*(.-)%s*$","%1")
 petMatch=string.gsub(petMatch,"%s*%(%d+%.?%d*%%%)%s*$","")
 petMatch=string.gsub(petMatch,"^%s*(.-)%s*$","%1")
 local petLower=string.lower(petMatch)
-if not wasRecentlyNotified(petMatch,playerName)then
 local isSecret=false
 s.Text="Hatched: "..petMatch
 addLog("Hatched: "..petMatch)
@@ -238,7 +246,6 @@ addLog("⭐ SECRET: "..petMatch)
 sendNotification("SECRET PET!",msg,10)
 spawn(function()sendWebhook(msg)end)
 break
-end
 end
 end
 end
