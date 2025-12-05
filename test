@@ -39,8 +39,8 @@ local toggleCorner=Instance.new("UICorner")
 toggleCorner.CornerRadius=UDim.new(0,6)
 toggleCorner.Parent=toggleBtn
 local f=Instance.new("Frame")
-f.Size=UDim2.new(0,320,0,300)
-f.Position=UDim2.new(0.5,-160,0.5,-150)
+f.Size=UDim2.new(0,320,0,380)
+f.Position=UDim2.new(0.5,-160,0.5,-190)
 f.BackgroundColor3=Color3.fromRGB(30,30,30)
 f.BorderSizePixel=0
 f.Parent=g
@@ -84,10 +84,10 @@ webhookInput.Font=Enum.Font.Gotham
 webhookInput.Parent=f
 local logDisplay=Instance.new("TextLabel")
 logDisplay.Size=UDim2.new(0,280,0,80)
-logDisplay.Position=UDim2.new(0.5,-140,0,130)
+logDisplay.Position=UDim2.new(0.5,-140,0,155)
 logDisplay.BackgroundColor3=Color3.fromRGB(20,20,20)
 logDisplay.BorderSizePixel=0
-logDisplay.Text="Data capture active...\nEvents logged: 0"
+logDisplay.Text="Events: 0\nWaiting for game to load..."
 logDisplay.TextColor3=Color3.fromRGB(150,200,255)
 logDisplay.TextSize=9
 logDisplay.Font=Enum.Font.Gotham
@@ -95,6 +95,26 @@ logDisplay.TextWrapped=true
 logDisplay.TextXAlignment=Enum.TextXAlignment.Left
 logDisplay.TextYAlignment=Enum.TextYAlignment.Top
 logDisplay.Parent=f
+local sendDataBtn=Instance.new("TextButton")
+sendDataBtn.Size=UDim2.new(0,135,0,35)
+sendDataBtn.Position=UDim2.new(0.5,-145,0,245)
+sendDataBtn.BackgroundColor3=Color3.fromRGB(80,120,200)
+sendDataBtn.BorderSizePixel=0
+sendDataBtn.Text="Send Captured Data"
+sendDataBtn.TextColor3=Color3.fromRGB(255,255,255)
+sendDataBtn.TextSize=11
+sendDataBtn.Font=Enum.Font.Gotham
+sendDataBtn.Parent=f
+local sendTestBtn=Instance.new("TextButton")
+sendTestBtn.Size=UDim2.new(0,135,0,35)
+sendTestBtn.Position=UDim2.new(0.5,10,0,245)
+sendTestBtn.BackgroundColor3=Color3.fromRGB(120,80,200)
+sendTestBtn.BorderSizePixel=0
+sendTestBtn.Text="Send Test"
+sendTestBtn.TextColor3=Color3.fromRGB(255,255,255)
+sendTestBtn.TextSize=11
+sendTestBtn.Font=Enum.Font.Gotham
+sendTestBtn.Parent=f
 local function addLog(text)
 local current=logDisplay.Text or""
 local lines={}
@@ -116,9 +136,9 @@ logDisplay.Text=table.concat(lines,"\n")
 end
 local s=Instance.new("TextLabel")
 s.Size=UDim2.new(0,280,0,35)
-s.Position=UDim2.new(0.5,-140,0,250)
+s.Position=UDim2.new(0.5,-140,0,290)
 s.BackgroundTransparency=1
-s.Text="Status: Ready"
+s.Text="Status: Loading..."
 s.TextColor3=Color3.fromRGB(200,200,200)
 s.TextSize=10
 s.Font=Enum.Font.Gotham
@@ -127,25 +147,31 @@ s.Parent=f
 local en=false
 local WEBHOOK=""
 local capturedData={}
+local capturedTables={}
+local storageChanges={}
 local eventCount=0
-local lastCaptureTime=0
-local captureTimer=0
-local function serializeValue(v,depth)
+local function serializeValue(v,depth,full)
 depth=depth or 0
-if depth>3 then return"[Max Depth]"end
+full=full or false
+if depth>5 and not full then return"[Max Depth]"end
 local vType=type(v)
 if vType=="string"then
-if#v>500 then return string.sub(v,1,500).."[truncated]"end
+if#v>1000 then return string.sub(v,1,1000).."[truncated]"end
 return string.format("%q",v)
 elseif vType=="number"or vType=="boolean"then
 return tostring(v)
 elseif vType=="nil"then
 return"nil"
 elseif vType=="table"then
+local tableId=tostring(v):gsub("table: ","")
+if not full and capturedTables[tableId]then
+return"[Table: "..tableId.." - see table data section]"
+end
+capturedTables[tableId]=true
 local parts={"{"}
 for k,val in pairs(v)do
 local keyStr=type(k)=="string"and string.format("[%q]",k)or"["..tostring(k).."]"
-local valStr=serializeValue(val,depth+1)
+local valStr=serializeValue(val,depth+1,full)
 table.insert(parts,keyStr.."="..valStr)
 end
 table.insert(parts,"}")
@@ -301,22 +327,20 @@ local function hookRemote(r)
 if hooked[r]then return end
 hooked[r]=true
 if r:IsA("RemoteEvent")then
-local connection
-connection=r.OnClientEvent:Connect(function(...)
+r.OnClientEvent:Connect(function(...)
 local args={...}
 eventCount=eventCount+1
-lastCaptureTime=tick()
 local entry={}
 entry.time=os.date("%X")
 entry.remote=r.Name
 entry.remotePath=r:GetFullName()
 entry.args={}
 for i,v in ipairs(args)do
-entry.args[i]=serializeValue(v)
+entry.args[i]=serializeValue(v,0,true)
 end
 table.insert(capturedData,entry)
 addLog("Event: "..r.Name)
-if#capturedData>1000 then
+if#capturedData>5000 then
 table.remove(capturedData,1)
 end
 end)
@@ -325,18 +349,17 @@ local originalInvoke=r.OnClientInvoke
 r.OnClientInvoke=function(...)
 local args={...}
 eventCount=eventCount+1
-lastCaptureTime=tick()
 local entry={}
 entry.time=os.date("%X")
 entry.remote=r.Name.." (Invoke)"
 entry.remotePath=r:GetFullName()
 entry.args={}
 for i,v in ipairs(args)do
-entry.args[i]=serializeValue(v)
+entry.args[i]=serializeValue(v,0,true)
 end
 table.insert(capturedData,entry)
 addLog("Invoke: "..r.Name)
-if#capturedData>1000 then
+if#capturedData>5000 then
 table.remove(capturedData,1)
 end
 if originalInvoke then
@@ -346,12 +369,53 @@ return nil
 end
 end
 end
+local function captureStorageChanges()
+RS.ChildAdded:Connect(function(child)
+local entry={}
+entry.time=os.date("%X")
+entry.type="ChildAdded"
+entry.child=child.Name
+entry.class=child.ClassName
+entry.path=child:GetFullName()
+table.insert(storageChanges,entry)
+if#storageChanges>1000 then
+table.remove(storageChanges,1)
+end
+end)
+RS.ChildRemoved:Connect(function(child)
+local entry={}
+entry.time=os.date("%X")
+entry.type="ChildRemoved"
+entry.child=child.Name
+entry.class=child.ClassName
+entry.path=child:GetFullName()
+table.insert(storageChanges,entry)
+if#storageChanges>1000 then
+table.remove(storageChanges,1)
+end
+end)
+RS.DescendantAdded:Connect(function(desc)
+if desc~=RS then
+local entry={}
+entry.time=os.date("%X")
+entry.type="DescendantAdded"
+entry.name=desc.Name
+entry.class=desc.ClassName
+entry.path=desc:GetFullName()
+table.insert(storageChanges,entry)
+if#storageChanges>1000 then
+table.remove(storageChanges,1)
+end
+end
+end)
+end
 local function formatDataForFile()
 local lines={}
 table.insert(lines,"=== BUBBLEGUM SIMULATOR DATA CAPTURE ===")
 table.insert(lines,"Player: "..p.Name)
 table.insert(lines,"Time: "..os.date("%Y-%m-%d %X"))
 table.insert(lines,"Events Captured: "..eventCount)
+table.insert(lines,"Storage Changes: "..(#storageChanges))
 table.insert(lines,"")
 table.insert(lines,"=== REMOTE EVENTS ===")
 table.insert(lines,"")
@@ -363,6 +427,16 @@ table.insert(lines,"Args:")
 for j,arg in ipairs(entry.args)do
 table.insert(lines,"  ["..j.."] = "..arg)
 end
+table.insert(lines,"")
+end
+table.insert(lines,"=== STORAGE CHANGES ===")
+table.insert(lines,"")
+for i,entry in ipairs(storageChanges)do
+table.insert(lines,"--- Change #"..i.." ["..entry.time.."] ---")
+table.insert(lines,"Type: "..entry.type)
+table.insert(lines,"Class: "..entry.class)
+table.insert(lines,"Name: "..(entry.child or entry.name or"N/A"))
+table.insert(lines,"Path: "..entry.path)
 table.insert(lines,"")
 end
 return table.concat(lines,"\n")
@@ -386,13 +460,18 @@ scanInstance(game:GetService("StarterPlayer"))
 return count
 end
 spawn(function()
-wait(2)
+wait(5)
+sendNotification("Loading","Waiting for game to fully load...",3)
+task.wait(3)
+s.Text="Scanning for remotes..."
 local count=scanForRemotes()
-s.Text="Hooked "..count.." Remotes - Capturing..."
+captureStorageChanges()
+s.Text="Hooked "..count.." Remotes - Ready!"
 addLog("Found "..count.." remotes")
 if count==0 then
-sendNotification("Warning","No remotes found! Try hatching an egg.",5)
+sendNotification("Warning","No remotes found!",5)
 end
+sendNotification("Ready","Data capture active!",3)
 end)
 RS.DescendantAdded:Connect(function(desc)
 if(desc:IsA("RemoteEvent")or desc:IsA("RemoteFunction"))and not hooked[desc]then hookRemote(desc)end
@@ -402,19 +481,6 @@ if(desc:IsA("RemoteEvent")or desc:IsA("RemoteFunction"))and not hooked[desc]then
 end)
 game.DescendantAdded:Connect(function(desc)
 if(desc:IsA("RemoteEvent")or desc:IsA("RemoteFunction"))and not hooked[desc]and(desc.Parent==RS or desc.Parent==WS or string.find(desc:GetFullName(),"Replicated"))then hookRemote(desc)end
-end)
-spawn(function()
-while true do
-task.wait(1)
-if lastCaptureTime>0 and tick()-lastCaptureTime>=20 and#capturedData>0 then
-local dataText=formatDataForFile()
-sendWebhookFile(dataText)
-capturedData={}
-eventCount=0
-lastCaptureTime=0
-addLog("Data sent! Resetting...")
-end
-end
 end)
 b1.Activated:Connect(function()
 en=not en
@@ -455,4 +521,59 @@ toggleBtn.Text=">>>"
 toggleBtn.BackgroundColor3=Color3.fromRGB(100,100,100)
 end
 end)
-game:GetService("StarterGui"):SetCore("SendNotification",{Title="Loaded",Text="Ready!",Duration=3})
+sendDataBtn.Activated:Connect(function()
+if WEBHOOK==""then
+sendNotification("Error","No webhook URL set!",5)
+s.Text="Error: No webhook URL"
+task.wait(2)
+s.Text="Status: Ready"
+return
+end
+if#capturedData==0 and#storageChanges==0 then
+sendNotification("Error","No data captured yet!",5)
+s.Text="No data to send"
+task.wait(2)
+s.Text="Status: Ready"
+return
+end
+local dataText=formatDataForFile()
+sendWebhookFile(dataText)
+sendNotification("Sending","Sending captured data to webhook...",3)
+end)
+sendTestBtn.Activated:Connect(function()
+if WEBHOOK==""then
+sendNotification("Error","No webhook URL set!",5)
+s.Text="Error: No webhook URL"
+task.wait(2)
+s.Text="Status: Ready"
+return
+end
+if not httpLib then
+sendNotification("Error","HTTP library not available!",5)
+s.Text="Error: No HTTP library"
+task.wait(2)
+s.Text="Status: Ready"
+return
+end
+spawn(function()
+sendNotification("Sending","Sending test message...",3)
+local webhookUrl=WEBHOOK
+local json=simpleJsonEncode({content="Test message from Bubblegum Script!"})
+local headers={["Content-Type"]="application/json"}
+local success,response,status=httpLib(webhookUrl,"POST",headers,json)
+if success and(status==200 or status==204)then
+s.Text="Test sent!"
+sendNotification("Success","Test message sent!",5)
+task.wait(2)
+s.Text="Status: Ready"
+else
+local errorMsg="Unknown error"
+if response then errorMsg=string.sub(tostring(response),1,50)end
+s.Text="Test failed"
+sendNotification("Error","Test failed: "..errorMsg,5)
+task.wait(2)
+s.Text="Status: Ready"
+end
+end)
+end)
+game:GetService("StarterGui"):SetCore("SendNotification",{Title="Loading",Text="Script initializing...",Duration=3})
