@@ -399,16 +399,16 @@ local function connectToEvents()
                                 local rarity = ItemUtil:GetRarity(pet)
                                 print("Rarity: " .. tostring(rarity))
                                 
-                                -- Check if Legendary or Secret
-                                if rarity == "Legendary" or rarity == "Secret" then
-                                    print(">>> " .. rarity .. " DETECTED! <<<")
+                                -- Check if Secret
+                                if rarity == "Secret" then
+                                    print(">>> SECRET DETECTED! <<<")
                                     print("Calling sendDiscordNotification...")
                                     
                                     -- Send webhook only (no in-game notifications)
                                     -- Pass the pet object so we can calculate probability
                                     sendDiscordNotification(petName, shiny, mythic, eggName, rarity, pet)
                                 else
-                                    print("Pet is " .. rarity .. " (not Legendary/Secret, skipping)")
+                                    print("Pet is " .. rarity .. " (not Secret, skipping)")
                                 end
                             end
                         end
@@ -452,7 +452,7 @@ f.Parent = g
 local title = Instance.new("TextLabel")
 title.Size = UDim2.new(1, -90, 0, 40)
 title.Position = UDim2.new(0, 50, 0, 0)
-title.BackgroundColor3 = Color3.fromRGB(50, 150, 50)
+title.BackgroundColor3 = Color3.fromRGB(60, 120, 200)
 title.Text = "Auto Hatch & Notifier"
 title.TextColor3 = Color3.fromRGB(255, 255, 255)
 title.TextSize = 16
