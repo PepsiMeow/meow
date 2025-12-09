@@ -215,165 +215,90 @@ local function sendDiscordNotificationInternal(petName, shiny, mythic, eggName, 
     local petImage = getPetImage(petName, shiny, mythic)
     
     -- Determine color based on pet type
-    local embedColor = 9807270 -- Grey for normal pets
+    local embedColor = 9807270 -- Grey for normal/legendary/secret pets
     if shiny and mythic then
         embedColor = 16711680 -- Bright red for Shiny Mythic
     elseif shiny then
         embedColor = 16766720 -- Gold/yellow-orange for Shiny
     elseif mythic then
         embedColor = 10181046 -- Purple-pink for Mythic
-    elseif rarity == "Secret" then
-        embedColor = 16711680 -- Red for Secret
-    elseif rarity == "Legendary" then
-        embedColor = 16755200 -- Orange for Legendary
     end
     
     -- Build mention
     local mention = discordUserID ~= "" and ("<@" .. discordUserID .. "> ") or ""
     
-    -- Try progressively simpler payloads
-    local attempts = {
-        -- Attempt 1: Full embed with all features
-        function()
-            local embed = {
-                title = "🎉 Congratulations!",
-                description = mention .. "**" .. playerName .. "** hatched **" .. fullPetName .. "**!",
-                color = embedColor,
-                fields = {
-                    {
-                        name = "Hatched",
-                        value = fullPetName,
-                        inline = false
-                    },
-                    {
-                        name = "Rarity",
-                        value = rarity,
-                        inline = true
-                    },
-                    {
-                        name = "Egg",
-                        value = eggName or "Unknown",
-                        inline = true
-                    }
-                },
-                timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+    -- Build embed (always use attempt 1 format)
+    local embed = {
+        title = "🎉 Congratulations!",
+        description = mention .. "**" .. playerName .. "** hatched **" .. fullPetName .. "**!",
+        color = embedColor,
+        fields = {
+            {
+                name = "Hatched",
+                value = fullPetName,
+                inline = false
+            },
+            {
+                name = "Rarity",
+                value = rarity,
+                inline = true
+            },
+            {
+                name = "Egg",
+                value = eggName or "Unknown",
+                inline = true
             }
-            
-            -- Only add thumbnail if image URL is valid
-            if petImage and type(petImage) == "string" and petImage ~= "" then
-                -- Validate URL format (should start with http:// or https:// or rbxassetid://)
-                if string.match(petImage, "^https?://") or string.match(petImage, "^rbxassetid://") then
-                    embed.thumbnail = {
-                        url = petImage
-                    }
-                end
+        },
+        timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+    }
+    
+    -- Only add thumbnail if image URL is valid Discord format
+    if petImage and type(petImage) == "string" and petImage ~= "" then
+        -- Discord requires https:// URLs or rbxassetid:// format
+        -- Convert rbxassetid:// to https:// if needed
+        local imageUrl = petImage
+        if string.match(petImage, "^rbxassetid://") then
+            -- Extract asset ID
+            local assetId = string.match(petImage, "rbxassetid://(%d+)")
+            if assetId then
+                -- Convert to Roblox CDN URL
+                imageUrl = "https://www.roblox.com/asset/?id=" .. assetId
             end
-            
-            return {
-                content = mention,
-                embeds = {embed}
-            }
-        end,
+        end
         
-        -- Attempt 2: Embed without thumbnail
-        function()
-            local embed = {
-                title = "🎉 Congratulations!",
-                description = mention .. "**" .. playerName .. "** hatched **" .. fullPetName .. "**!",
-                color = embedColor,
-                fields = {
-                    {
-                        name = "Hatched",
-                        value = fullPetName,
-                        inline = false
-                    },
-                    {
-                        name = "Rarity",
-                        value = rarity,
-                        inline = true
-                    }
-                },
-                timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
-            }
-            
-            return {
-                content = mention,
-                embeds = {embed}
-            }
-        end,
-        
-        -- Attempt 3: Embed without fields
-        function()
-            local embed = {
-                title = "🎉 Congratulations!",
-                description = mention .. "**" .. playerName .. "** hatched **" .. fullPetName .. "**!\n**Rarity:** " .. rarity,
-                color = embedColor,
-                timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
-            }
-            
-            if petImage then
-                embed.thumbnail = {
-                    url = petImage
-                }
-            end
-            
-            return {
-                content = mention,
-                embeds = {embed}
-            }
-        end,
-        
-        -- Attempt 4: Simple embed
-        function()
-            return {
-                content = mention .. "🎉 **Congratulations!** " .. playerName .. " hatched **" .. fullPetName .. "**! (" .. rarity .. ")",
-                embeds = {}
-            }
-        end,
-        
-        -- Attempt 5: Plain message
-        function()
-            return {
-                content = mention .. "🎉 Congratulations! " .. playerName .. " hatched " .. fullPetName .. "! (" .. rarity .. ")"
+        -- Only add if it's a valid https:// URL
+        if string.match(imageUrl, "^https://") then
+            embed.thumbnail = {
+                url = imageUrl
             }
         end
+    end
+    
+    local payload = {
+        content = mention,
+        embeds = {embed}
     }
     
     print("Sending webhook for " .. rarity .. " pet: " .. petName)
     
     local headers = {["Content-Type"] = "application/json"}
-    local success = false
-    local status = 0
-    local response = ""
+    local json = jsonEncode(payload)
+    local success, response, status = httpLib(webhookURL, "POST", headers, json)
     
-    -- Try each attempt in order
-    for i, attemptFunc in ipairs(attempts) do
-        local payload = attemptFunc()
-        local json = jsonEncode(payload)
-        
-        print("Attempt " .. i .. ": " .. (#json < 200 and json or string.sub(json, 1, 200) .. "..."))
-        
-        success, response, status = httpLib(webhookURL, "POST", headers, json)
-        
-        if success and (status == 200 or status == 204) then
-            print("✓ Discord notification sent! (Attempt " .. i .. ", Status: " .. tostring(status) .. ")")
-            return true
-        elseif status == 429 then
-            -- Rate limited - return false to trigger retry
-            print("✗ Rate limited (429), will retry...")
-            return false
-        else
-            print("✗ Attempt " .. i .. " failed: Status " .. tostring(status))
-            if i < #attempts then
-                print("  Trying simpler format...")
-            end
-        end
+    if success and (status == 200 or status == 204) then
+        print("✓ Discord notification sent! Status: " .. tostring(status))
+        return true
+    elseif status == 429 then
+        -- Rate limited - return false to trigger retry
+        print("✗ Rate limited (429), will retry...")
+        return false
+    else
+        print("✗ Webhook failed!")
+        print("  Status: " .. tostring(status))
+        print("  Response: " .. tostring(response))
+        -- For non-429 errors, still return false to retry (might be temporary)
+        return false
     end
-    
-    print("✗ All attempts failed!")
-    print("  Final Status: " .. tostring(status))
-    print("  Response: " .. tostring(response))
-    return false
 end
 
 -- Public function to queue webhook (handles rate limiting)
@@ -461,12 +386,6 @@ local function connectToEvents()
                                 if rarity == "Legendary" or rarity == "Secret" then
                                     print(">>> " .. rarity .. " DETECTED! <<<")
                                     
-                                    -- Update status
-                                    if statusLabel then
-                                        statusLabel.Text = "Status: " .. rarity .. " hatched!\n" .. petName
-                                        statusLabel.TextColor3 = rarity == "Secret" and Color3.fromRGB(255, 100, 100) or Color3.fromRGB(255, 200, 100)
-                                    end
-                                    
                                     -- Send notifications
                                     sendInGameNotification(petName, shiny, mythic, rarity)
                                     sendDiscordNotification(petName, shiny, mythic, eggName, rarity)
@@ -485,17 +404,9 @@ local function connectToEvents()
     
     if success then
         print("✓ Connected to HatchEgg events")
-        if statusLabel then
-            statusLabel.Text = "Status: Connected to events\nWaiting for Legendary/Secret..."
-            statusLabel.TextColor3 = Color3.fromRGB(150, 255, 150)
-        end
         return true
     else
         print("✗ Failed to connect: " .. tostring(err))
-        if statusLabel then
-            statusLabel.Text = "Status: Connection failed!\n" .. tostring(err)
-            statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
-        end
         return false
     end
 end
@@ -511,8 +422,8 @@ g.Parent = p.PlayerGui
 
 -- Main frame
 local f = Instance.new("Frame")
-f.Size = UDim2.new(0, 350, 0, 400)
-f.Position = UDim2.new(0.5, -175, 0.5, -200)
+f.Size = UDim2.new(0, 350, 0, 240)
+f.Position = UDim2.new(0.5, -175, 0.5, -120)
 f.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 f.BorderSizePixel = 0
 f.Parent = g
@@ -631,9 +542,10 @@ webhookInput.TextColor3 = Color3.fromRGB(255, 255, 255)
 webhookInput.Text = ""
 webhookInput.PlaceholderText = "https://discord.com/api/webhooks/..."
 webhookInput.PlaceholderColor3 = Color3.fromRGB(150, 150, 150)
-webhookInput.TextSize = 11
+webhookInput.TextSize = 10
 webhookInput.Font = Enum.Font.Gotham
 webhookInput.BorderSizePixel = 0
+webhookInput.TextTruncate = Enum.TextTruncate.AtEnd
 webhookInput.Parent = f
 
 -- Discord User ID label
@@ -662,24 +574,14 @@ userIDInput.Font = Enum.Font.Gotham
 userIDInput.BorderSizePixel = 0
 userIDInput.Parent = f
 
--- Status label (for debugging)
-local statusLabel = Instance.new("TextLabel")
-statusLabel.Size = UDim2.new(0, 320, 0, 120)
-statusLabel.Position = UDim2.new(0, 15, 0, 230)
-statusLabel.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-statusLabel.Text = "Status: Loading modules...\nWaiting for connection..."
-statusLabel.TextColor3 = Color3.fromRGB(150, 255, 150)
-statusLabel.TextSize = 11
-statusLabel.Font = Enum.Font.Gotham
-statusLabel.TextWrapped = true
-statusLabel.BorderSizePixel = 0
-statusLabel.Parent = f
+-- Status label (hidden, used for internal status tracking)
+local statusLabel = nil
 
 
--- Toggle GUI button (top right)
+-- Toggle GUI button (top right, moved up)
 local toggleBtn = Instance.new("TextButton")
 toggleBtn.Size = UDim2.new(0, 50, 0, 50)
-toggleBtn.Position = UDim2.new(1, -60, 0, 10)
+toggleBtn.Position = UDim2.new(1, -60, 0, -40)
 toggleBtn.BackgroundColor3 = Color3.fromRGB(60, 120, 200)
 toggleBtn.Text = "GUI"
 toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -695,7 +597,6 @@ autoHatchBtn.Activated:Connect(function()
     if autoHatchEnabled then
         autoHatchBtn.Text = "Auto Hatch: ON"
         autoHatchBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
-        statusLabel.Text = "Status: Auto Hatch Active\nPressing E every 0.2s"
         
         -- Start E key spam
         spawn(function()
@@ -709,7 +610,6 @@ autoHatchBtn.Activated:Connect(function()
     else
         autoHatchBtn.Text = "Auto Hatch: OFF"
         autoHatchBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-        statusLabel.Text = "Status: Auto Hatch Stopped"
     end
 end)
 
@@ -717,24 +617,12 @@ end)
 webhookInput.FocusLost:Connect(function(enterPressed)
     local url = webhookInput.Text:gsub("^%s*(.-)%s*$", "%1")
     webhookURL = url
-    
-    if url ~= "" then
-        statusLabel.Text = "Status: Webhook URL saved\nNotifications enabled for Legendary & Secret pets"
-        statusLabel.TextColor3 = Color3.fromRGB(150, 255, 150)
-    else
-        statusLabel.Text = "Status: No webhook URL\nNotifications disabled"
-        statusLabel.TextColor3 = Color3.fromRGB(255, 150, 150)
-    end
 end)
 
 -- Discord User ID input handler
 userIDInput.FocusLost:Connect(function(enterPressed)
     local id = userIDInput.Text:gsub("^%s*(.-)%s*$", "%1")
     discordUserID = id
-    
-    if id ~= "" then
-        statusLabel.Text = "Status: User ID saved\nYou will be pinged in notifications"
-    end
 end)
 
 -- Close X button - opens confirmation dialog
