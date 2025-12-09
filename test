@@ -73,27 +73,46 @@ if request then
     httpLibName = "request"
 end
 
--- JSON encoder (simplified for Discord webhooks)
+-- JSON encoder (properly handles nested structures)
 local function jsonEncode(t)
-    local function encodeValue(v)
+    local function encodeValue(v, depth)
+        depth = depth or 0
+        if depth > 10 then return "null" end -- Prevent infinite recursion
+        
         if type(v) == "string" then
-            return string.format("%q", v)
+            -- Escape special characters
+            v = v:gsub("\\", "\\\\")
+            v = v:gsub('"', '\\"')
+            v = v:gsub("\n", "\\n")
+            v = v:gsub("\r", "\\r")
+            v = v:gsub("\t", "\\t")
+            return '"' .. v .. '"'
         elseif type(v) == "number" then
             return tostring(v)
         elseif type(v) == "boolean" then
             return v and "true" or "false"
         elseif type(v) == "table" then
-            local isArray = #v > 0
+            -- Check if it's an array
+            local isArray = false
+            local maxIndex = 0
+            for k in pairs(v) do
+                if type(k) == "number" then
+                    maxIndex = math.max(maxIndex, k)
+                end
+            end
+            isArray = maxIndex > 0 and maxIndex == #v
+            
             local parts = {}
             if isArray then
-                for i, val in ipairs(v) do
-                    table.insert(parts, encodeValue(val))
+                for i = 1, maxIndex do
+                    table.insert(parts, encodeValue(v[i], depth + 1))
                 end
                 return "[" .. table.concat(parts, ",") .. "]"
             else
                 for k, val in pairs(v) do
                     if val ~= nil then
-                        table.insert(parts, string.format("%q", k) .. ":" .. encodeValue(val))
+                        local key = type(k) == "string" and ('"' .. k .. '"') or tostring(k)
+                        table.insert(parts, key .. ":" .. encodeValue(val, depth + 1))
                     end
                 end
                 return "{" .. table.concat(parts, ",") .. "}"
@@ -102,7 +121,7 @@ local function jsonEncode(t)
             return "null"
         end
     end
-    return encodeValue(t)
+    return encodeValue(t, 0)
 end
 
 -- Get pet image
@@ -188,11 +207,34 @@ local function sendDiscordNotification(petName, shiny, mythic, eggName, rarity)
     local headers = {["Content-Type"] = "application/json"}
     
     print("Sending webhook for " .. rarity .. " pet: " .. petName)
-    local success, _, status = httpLib(webhookURL, "POST", headers, json)
+    
+    -- Try sending with embed first
+    local json = jsonEncode(payload)
+    local headers = {["Content-Type"] = "application/json"}
+    
+    local success, response, status = httpLib(webhookURL, "POST", headers, json)
+    
+    -- If embed fails, try simple message
+    if not success or (status ~= 200 and status ~= 204) then
+        print("Embed failed, trying simple message...")
+        print("  Status: " .. tostring(status))
+        print("  Response: " .. tostring(response))
+        
+        -- Fallback to simple message
+        local simplePayload = {
+            content = message
+        }
+        local simpleJson = jsonEncode(simplePayload)
+        success, response, status = httpLib(webhookURL, "POST", headers, simpleJson)
+    end
+    
     if success and (status == 200 or status == 204) then
         print("✓ Discord notification sent! Status: " .. tostring(status))
     else
-        print("✗ Discord notification failed! Success: " .. tostring(success) .. ", Status: " .. tostring(status))
+        print("✗ Discord notification failed!")
+        print("  Success: " .. tostring(success))
+        print("  Status: " .. tostring(status))
+        print("  Response: " .. tostring(response))
     end
 end
 
