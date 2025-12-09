@@ -22,6 +22,10 @@ local autoHatchEnabled = false
 local webhookURL = ""
 local discordUserID = ""
 
+-- Webhook queue for rate limiting
+local webhookQueue = {}
+local isSendingWebhook = false
+
 -- Load modules
 local function loadModules()
     -- Load Remote
@@ -143,11 +147,55 @@ local function getPetImage(pet, shiny, mythic)
     return petData.Images[imageType] or petData.Images.Normal
 end
 
--- Send Discord webhook with beautiful embed
-local function sendDiscordNotification(petName, shiny, mythic, eggName, rarity)
+-- Process webhook queue
+local function processWebhookQueue()
+    if isSendingWebhook or #webhookQueue == 0 then
+        return
+    end
+    
+    isSendingWebhook = true
+    
+    spawn(function()
+        while #webhookQueue > 0 do
+            local webhookData = table.remove(webhookQueue, 1)
+            local petName = webhookData.petName
+            local shiny = webhookData.shiny
+            local mythic = webhookData.mythic
+            local eggName = webhookData.eggName
+            local rarity = webhookData.rarity
+            
+            -- Try sending with retry on rate limit
+            local maxRetries = 5
+            local retryCount = 0
+            local success = false
+            
+            while retryCount < maxRetries and not success do
+                success = sendDiscordNotificationInternal(petName, shiny, mythic, eggName, rarity)
+                
+                if not success then
+                    retryCount = retryCount + 1
+                    if retryCount < maxRetries then
+                        print("Rate limited, waiting 1 second before retry " .. retryCount .. "/" .. maxRetries)
+                        task.wait(1)
+                    end
+                end
+            end
+            
+            -- Wait 1 second before sending next message in queue
+            if #webhookQueue > 0 then
+                task.wait(1)
+            end
+        end
+        
+        isSendingWebhook = false
+    end)
+end
+
+-- Internal function to send webhook (returns true if successful, false if rate limited)
+local function sendDiscordNotificationInternal(petName, shiny, mythic, eggName, rarity)
     if not httpLib or webhookURL == "" then 
         print("✗ Cannot send: httpLib=" .. tostring(httpLib) .. ", webhookURL=" .. tostring(webhookURL))
-        return 
+        return true -- Return true to not retry if webhook not configured
     end
     
     -- Get player name
@@ -167,7 +215,7 @@ local function sendDiscordNotification(petName, shiny, mythic, eggName, rarity)
     local petImage = getPetImage(petName, shiny, mythic)
     
     -- Determine color based on pet type
-    local embedColor = 3447003 -- Default blue
+    local embedColor = 9807270 -- Grey for normal pets
     if shiny and mythic then
         embedColor = 16711680 -- Bright red for Shiny Mythic
     elseif shiny then
@@ -211,10 +259,14 @@ local function sendDiscordNotification(petName, shiny, mythic, eggName, rarity)
                 timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
             }
             
-            if petImage then
-                embed.thumbnail = {
-                    url = petImage
-                }
+            -- Only add thumbnail if image URL is valid
+            if petImage and type(petImage) == "string" and petImage ~= "" then
+                -- Validate URL format (should start with http:// or https:// or rbxassetid://)
+                if string.match(petImage, "^https?://") or string.match(petImage, "^rbxassetid://") then
+                    embed.thumbnail = {
+                        url = petImage
+                    }
+                end
             end
             
             return {
@@ -305,7 +357,11 @@ local function sendDiscordNotification(petName, shiny, mythic, eggName, rarity)
         
         if success and (status == 200 or status == 204) then
             print("✓ Discord notification sent! (Attempt " .. i .. ", Status: " .. tostring(status) .. ")")
-            return
+            return true
+        elseif status == 429 then
+            -- Rate limited - return false to trigger retry
+            print("✗ Rate limited (429), will retry...")
+            return false
         else
             print("✗ Attempt " .. i .. " failed: Status " .. tostring(status))
             if i < #attempts then
@@ -317,6 +373,22 @@ local function sendDiscordNotification(petName, shiny, mythic, eggName, rarity)
     print("✗ All attempts failed!")
     print("  Final Status: " .. tostring(status))
     print("  Response: " .. tostring(response))
+    return false
+end
+
+-- Public function to queue webhook (handles rate limiting)
+local function sendDiscordNotification(petName, shiny, mythic, eggName, rarity)
+    -- Add to queue
+    table.insert(webhookQueue, {
+        petName = petName,
+        shiny = shiny,
+        mythic = mythic,
+        eggName = eggName,
+        rarity = rarity
+    })
+    
+    -- Start processing queue if not already processing
+    processWebhookQueue()
 end
 
 -- Send in-game notification
@@ -461,9 +533,9 @@ local closeXBtn = Instance.new("TextButton")
 closeXBtn.Size = UDim2.new(0, 40, 0, 40)
 closeXBtn.Position = UDim2.new(1, -40, 0, 0)
 closeXBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-closeXBtn.Text = "✕"
+closeXBtn.Text = "X"
 closeXBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-closeXBtn.TextSize = 20
+closeXBtn.TextSize = 24
 closeXBtn.Font = Enum.Font.GothamBold
 closeXBtn.BorderSizePixel = 0
 closeXBtn.Parent = f
@@ -487,6 +559,7 @@ confirmTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
 confirmTitle.TextSize = 16
 confirmTitle.Font = Enum.Font.GothamBold
 confirmTitle.BorderSizePixel = 0
+confirmTitle.ZIndex = 11
 confirmTitle.Parent = confirmFrame
 
 local confirmText = Instance.new("TextLabel")
@@ -498,6 +571,7 @@ confirmText.TextColor3 = Color3.fromRGB(255, 255, 255)
 confirmText.TextSize = 12
 confirmText.Font = Enum.Font.Gotham
 confirmText.TextWrapped = true
+confirmText.ZIndex = 11
 confirmText.Parent = confirmFrame
 
 local yesBtn = Instance.new("TextButton")
@@ -509,6 +583,7 @@ yesBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 yesBtn.TextSize = 12
 yesBtn.Font = Enum.Font.GothamBold
 yesBtn.BorderSizePixel = 0
+yesBtn.ZIndex = 11
 yesBtn.Parent = confirmFrame
 
 local noBtn = Instance.new("TextButton")
@@ -520,6 +595,7 @@ noBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 noBtn.TextSize = 12
 noBtn.Font = Enum.Font.GothamBold
 noBtn.BorderSizePixel = 0
+noBtn.ZIndex = 11
 noBtn.Parent = confirmFrame
 
 -- Auto Hatch button
