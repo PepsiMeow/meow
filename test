@@ -1,900 +1,405 @@
-local P=game:GetService("Players")
-local RS=game:GetService("ReplicatedStorage")
-local WS=game:GetService("Workspace")
-local SS=game:GetService("StarterGui")
-local p=P.LocalPlayer
-local newcclosure=newcclosure or function(func)return func end
-wait(1)
-local httpLib=nil
-local httpLibName=""
-local httpErrorMsg=""
-if delta and delta.request then
-httpLib=function(url,method,headers,body)
-local success,res,err=pcall(function()
-return delta.request({Url=url,Method=method,Headers=headers or{},Body=body})
+-- BUBBLEGUM SIMULATOR - AUTO HATCH & SECRET NOTIFIER
+-- Final version with auto hatch and Discord notifications
+
+local P = game:GetService("Players")
+local RS = game:GetService("ReplicatedStorage")
+local UIS = game:GetService("UserInputService")
+local VIM = game:GetService("VirtualInputManager")
+local p = P.LocalPlayer
+
+print("========================================")
+print("BUBBLEGUM AUTO HATCH & NOTIFIER")
+print("Version: Final")
+print("========================================")
+
+-- Load required modules
+local Remote = nil
+local ItemUtil = nil
+local PetsData = nil
+
+-- Settings
+local autoHatchEnabled = false
+local webhookURL = ""
+local discordUserID = ""
+
+-- Load modules
+local function loadModules()
+    -- Load Remote
+    local success, remoteModule = pcall(function()
+        return require(RS.Shared.Framework.Network.Remote)
+    end)
+    if success and remoteModule then
+        Remote = remoteModule
+        print("✓ Loaded Remote module")
+    end
+    
+    -- Load ItemUtil
+    local success2, itemUtil = pcall(function()
+        return require(RS.Shared.Utils.Stats.ItemUtil)
+    end)
+    if success2 and itemUtil then
+        ItemUtil = itemUtil
+        print("✓ Loaded ItemUtil")
+    end
+    
+    -- Load Pets data for images
+    local success3, petsData = pcall(function()
+        return require(RS.Shared.Data.Pets)
+    end)
+    if success3 and petsData then
+        PetsData = petsData
+        print("✓ Loaded Pets data")
+    end
+end
+
+loadModules()
+
+-- HTTP for Delta Mobile
+local httpLib = nil
+if request then
+    httpLib = function(url, method, headers, body)
+        local res = request({Url = url, Method = method, Headers = headers, Body = body})
+        return res.Success or res.success, res.Body or res.body, res.StatusCode
+    end
+end
+
+-- JSON encoder (simplified for Discord webhooks)
+local function jsonEncode(t)
+    local function encodeValue(v)
+        if type(v) == "string" then
+            return string.format("%q", v)
+        elseif type(v) == "number" then
+            return tostring(v)
+        elseif type(v) == "boolean" then
+            return v and "true" or "false"
+        elseif type(v) == "table" then
+            local isArray = #v > 0
+            local parts = {}
+            if isArray then
+                for i, val in ipairs(v) do
+                    table.insert(parts, encodeValue(val))
+                end
+                return "[" .. table.concat(parts, ",") .. "]"
+            else
+                for k, val in pairs(v) do
+                    if val ~= nil then
+                        table.insert(parts, string.format("%q", k) .. ":" .. encodeValue(val))
+                    end
+                end
+                return "{" .. table.concat(parts, ",") .. "}"
+            end
+        else
+            return "null"
+        end
+    end
+    return encodeValue(t)
+end
+
+-- Get pet image
+local function getPetImage(pet, shiny, mythic)
+    if not PetsData or not pet then return nil end
+    
+    local petData = PetsData[pet]
+    if not petData or not petData.Images then return nil end
+    
+    local imageType = "Normal"
+    if shiny and mythic then
+        imageType = "MythicShiny"
+    elseif shiny then
+        imageType = "Shiny"
+    elseif mythic then
+        imageType = "Mythic"
+    end
+    
+    return petData.Images[imageType] or petData.Images.Normal
+end
+
+-- Send Discord webhook
+local function sendDiscordNotification(petName, shiny, mythic, eggName, rarity)
+    if not httpLib or webhookURL == "" then return end
+    
+    -- Build pet prefix
+    local prefix = ""
+    if shiny and mythic then
+        prefix = "Shiny Mythic "
+    elseif shiny then
+        prefix = "Shiny "
+    elseif mythic then
+        prefix = "Mythic "
+    end
+    
+    -- Build message
+    local mention = discordUserID ~= "" and ("<@" .. discordUserID .. "> ") or ""
+    local message = mention .. "Congratulations! You hatched a " .. prefix .. petName .. "!"
+    
+    -- Get pet image
+    local petImage = getPetImage(petName, shiny, mythic)
+    
+    -- Build embed
+    local embed = {
+        title = "🎉 " .. rarity .. " Pet Hatched!",
+        description = message,
+        color = rarity == "Secret" and 0xff0000 or 0xffaa00, -- Red for secret, orange for legendary
+        fields = {
+            {
+                name = "Pet",
+                value = prefix .. petName,
+                inline = true
+            },
+            {
+                name = "Egg",
+                value = eggName or "Unknown",
+                inline = true
+            },
+            {
+                name = "Rarity",
+                value = rarity,
+                inline = true
+            }
+        },
+        timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+    }
+    
+    if petImage then
+        embed.thumbnail = {
+            url = petImage
+        }
+    end
+    
+    local payload = {
+        content = message,
+        embeds = {embed}
+    }
+    
+    local json = jsonEncode(payload)
+    local headers = {["Content-Type"] = "application/json"}
+    
+    local success, _, status = httpLib(webhookURL, "POST", headers, json)
+    if success and (status == 200 or status == 204) then
+        print("✓ Discord notification sent!")
+    else
+        print("✗ Discord notification failed: " .. tostring(status))
+    end
+end
+
+-- Connect to HatchEgg event
+if Remote then
+    Remote.Event("HatchEgg"):Connect(function(hatchedTable)
+        if type(hatchedTable) == "table" and hatchedTable.Pets then
+            local eggName = hatchedTable.Name
+            
+            for i = 1, 20 do
+                local petData = hatchedTable.Pets[i]
+                if not petData then break end
+                
+                if type(petData) == "table" and petData.Pet then
+                    local pet = petData.Pet
+                    local petName = pet.Name
+                    local shiny = pet.Shiny == true
+                    local mythic = pet.Mythic == true
+                    
+                    if petName and ItemUtil then
+                        local rarity = ItemUtil:GetRarity(pet)
+                        
+                        -- Check if Legendary or Secret
+                        if rarity == "Legendary" or rarity == "Secret" then
+                            sendDiscordNotification(petName, shiny, mythic, eggName, rarity)
+                        end
+                    end
+                end
+            end
+        end
+    end)
+    print("✓ Connected to HatchEgg events")
+end
+
+-- GUI
+local g = Instance.new("ScreenGui")
+g.Name = "BubblegumAutoHatch"
+g.Parent = p.PlayerGui
+
+-- Main frame
+local f = Instance.new("Frame")
+f.Size = UDim2.new(0, 350, 0, 400)
+f.Position = UDim2.new(0.5, -175, 0.5, -200)
+f.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+f.BorderSizePixel = 0
+f.Parent = g
+
+-- Title bar
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0, 40)
+title.BackgroundColor3 = Color3.fromRGB(50, 150, 50)
+title.Text = "Auto Hatch & Notifier"
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.TextSize = 16
+title.Font = Enum.Font.GothamBold
+title.BorderSizePixel = 0
+title.Parent = f
+
+-- Auto Hatch button
+local autoHatchBtn = Instance.new("TextButton")
+autoHatchBtn.Size = UDim2.new(0, 320, 0, 45)
+autoHatchBtn.Position = UDim2.new(0, 15, 0, 55)
+autoHatchBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+autoHatchBtn.Text = "Auto Hatch: OFF"
+autoHatchBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+autoHatchBtn.TextSize = 14
+autoHatchBtn.Font = Enum.Font.GothamBold
+autoHatchBtn.BorderSizePixel = 0
+autoHatchBtn.Parent = f
+
+-- Webhook URL label
+local webhookLabel = Instance.new("TextLabel")
+webhookLabel.Size = UDim2.new(0, 320, 0, 20)
+webhookLabel.Position = UDim2.new(0, 15, 0, 110)
+webhookLabel.BackgroundTransparency = 1
+webhookLabel.Text = "Discord Webhook URL:"
+webhookLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+webhookLabel.TextSize = 11
+webhookLabel.Font = Enum.Font.Gotham
+webhookLabel.TextXAlignment = Enum.TextXAlignment.Left
+webhookLabel.Parent = f
+
+-- Webhook URL input
+local webhookInput = Instance.new("TextBox")
+webhookInput.Size = UDim2.new(0, 320, 0, 30)
+webhookInput.Position = UDim2.new(0, 15, 0, 130)
+webhookInput.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+webhookInput.TextColor3 = Color3.fromRGB(255, 255, 255)
+webhookInput.Text = ""
+webhookInput.PlaceholderText = "https://discord.com/api/webhooks/..."
+webhookInput.PlaceholderColor3 = Color3.fromRGB(150, 150, 150)
+webhookInput.TextSize = 11
+webhookInput.Font = Enum.Font.Gotham
+webhookInput.BorderSizePixel = 0
+webhookInput.Parent = f
+
+-- Discord User ID label
+local userIDLabel = Instance.new("TextLabel")
+userIDLabel.Size = UDim2.new(0, 320, 0, 20)
+userIDLabel.Position = UDim2.new(0, 15, 0, 170)
+userIDLabel.BackgroundTransparency = 1
+userIDLabel.Text = "Discord User ID (optional):"
+userIDLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+userIDLabel.TextSize = 11
+userIDLabel.Font = Enum.Font.Gotham
+userIDLabel.TextXAlignment = Enum.TextXAlignment.Left
+userIDLabel.Parent = f
+
+-- Discord User ID input
+local userIDInput = Instance.new("TextBox")
+userIDInput.Size = UDim2.new(0, 320, 0, 30)
+userIDInput.Position = UDim2.new(0, 15, 0, 190)
+userIDInput.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+userIDInput.TextColor3 = Color3.fromRGB(255, 255, 255)
+userIDInput.Text = ""
+userIDInput.PlaceholderText = "123456789012345678"
+userIDInput.PlaceholderColor3 = Color3.fromRGB(150, 150, 150)
+userIDInput.TextSize = 11
+userIDInput.Font = Enum.Font.Gotham
+userIDInput.BorderSizePixel = 0
+userIDInput.Parent = f
+
+-- Status label
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Size = UDim2.new(0, 320, 0, 60)
+statusLabel.Position = UDim2.new(0, 15, 0, 230)
+statusLabel.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+statusLabel.Text = "Status: Ready\nEnter webhook URL to enable notifications"
+statusLabel.TextColor3 = Color3.fromRGB(150, 255, 150)
+statusLabel.TextSize = 11
+statusLabel.Font = Enum.Font.Gotham
+statusLabel.TextWrapped = true
+statusLabel.BorderSizePixel = 0
+statusLabel.Parent = f
+
+-- Info label
+local infoLabel = Instance.new("TextLabel")
+infoLabel.Size = UDim2.new(0, 320, 0, 80)
+infoLabel.Position = UDim2.new(0, 15, 0, 300)
+infoLabel.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+infoLabel.Text = "Detects: Legendary & Secret pets\nAuto Hatch: Presses E every 0.2s\nToggle GUI: Top right button"
+infoLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+infoLabel.TextSize = 10
+infoLabel.Font = Enum.Font.Gotham
+infoLabel.TextWrapped = true
+infoLabel.BorderSizePixel = 0
+infoLabel.Parent = f
+
+-- Toggle GUI button (top right)
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Size = UDim2.new(0, 50, 0, 50)
+toggleBtn.Position = UDim2.new(1, -60, 0, 10)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(60, 120, 200)
+toggleBtn.Text = "GUI"
+toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleBtn.TextSize = 12
+toggleBtn.Font = Enum.Font.GothamBold
+toggleBtn.BorderSizePixel = 0
+toggleBtn.Parent = g
+
+-- Auto Hatch functionality
+autoHatchBtn.Activated:Connect(function()
+    autoHatchEnabled = not autoHatchEnabled
+    
+    if autoHatchEnabled then
+        autoHatchBtn.Text = "Auto Hatch: ON"
+        autoHatchBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+        statusLabel.Text = "Status: Auto Hatch Active\nPressing E every 0.2s"
+        
+        -- Start E key spam
+        spawn(function()
+            while autoHatchEnabled do
+                VIM:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+                task.wait(0.05)
+                VIM:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+                task.wait(0.2)
+            end
+        end)
+    else
+        autoHatchBtn.Text = "Auto Hatch: OFF"
+        autoHatchBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+        statusLabel.Text = "Status: Auto Hatch Stopped"
+    end
 end)
-if success and res then
-local status=res.StatusCode or(res.Success and 200 or 0)
-local body=res.Body or""
-local ok=res.Success or status==200 or status==204
-httpErrorMsg=ok and""or("Status: "..tostring(status))
-return ok,body,status
-end
-httpErrorMsg=err or"Request exception"
-return false,httpErrorMsg,0
-end
-httpLibName="delta.request"
-elseif delta and delta.http then
-httpLib=function(url,method,headers,body)
-local success,res,err=pcall(function()
-return delta.http.post(url,body,headers or{})
+
+-- Webhook URL input handler
+webhookInput.FocusLost:Connect(function(enterPressed)
+    local url = webhookInput.Text:gsub("^%s*(.-)%s*$", "%1")
+    webhookURL = url
+    
+    if url ~= "" then
+        statusLabel.Text = "Status: Webhook URL saved\nNotifications enabled for Legendary & Secret pets"
+        statusLabel.TextColor3 = Color3.fromRGB(150, 255, 150)
+    else
+        statusLabel.Text = "Status: No webhook URL\nNotifications disabled"
+        statusLabel.TextColor3 = Color3.fromRGB(255, 150, 150)
+    end
 end)
-if success and res then
-return true,res or"",200
-end
-httpErrorMsg=err or"HTTP exception"
-return false,httpErrorMsg,0
-end
-httpLibName="delta.http"
-elseif _G.http_request then
-httpLib=function(url,method,headers,body)
-local success,res,err=pcall(function()
-return _G.http_request({Url=url,Method=method,Headers=headers or{},Body=body})
+
+-- Discord User ID input handler
+userIDInput.FocusLost:Connect(function(enterPressed)
+    local id = userIDInput.Text:gsub("^%s*(.-)%s*$", "%1")
+    discordUserID = id
+    
+    if id ~= "" then
+        statusLabel.Text = "Status: User ID saved\nYou will be pinged in notifications"
+    end
 end)
-if success and res then
-local status=res.StatusCode or(res.Success and 200 or 0)
-local body=res.Body or""
-local ok=res.Success or status==200 or status==204
-httpErrorMsg=ok and""or("Status: "..tostring(status))
-return ok,body,status
-end
-httpErrorMsg=err or"http_request exception"
-return false,httpErrorMsg,0
-end
-httpLibName="_G.http_request"
-elseif syn and syn.request then
-httpLib=function(url,method,headers,body)
-local success,res,err=pcall(function()
-return syn.request({Url=url,Method=method,Headers=headers or{},Body=body})
-end)
-if success and res then
-local status=res.StatusCode or(res.Success and 200 or 0)
-local body=res.Body or""
-local ok=res.Success or status==200 or status==204
-httpErrorMsg=ok and""or("Status: "..tostring(status))
-return ok,body,status
-end
-httpErrorMsg=err or"Request exception"
-return false,httpErrorMsg,0
-end
-httpLibName="syn.request"
-elseif request then
-httpLib=function(url,method,headers,body)
-local success,res,err=pcall(function()
-return request({url=url,method=method,headers=headers or{},body=body})
-end)
-if success and res then
-local status=res.StatusCode or(res.Success and 200 or(res.success and 200 or 0))
-local body=res.Body or res.body or""
-local ok=res.Success or res.success or status==200 or status==204
-httpErrorMsg=ok and""or("Status: "..tostring(status))
-return ok,body,status
-end
-httpErrorMsg=err or"Request exception"
-return false,httpErrorMsg,0
-end
-httpLibName="request"
-elseif http and http.post then
-httpLib=function(url,method,headers,body)
-if method=="POST"then
-local success,res,err=pcall(function()
-return http.post(url,body,headers or{})
-end)
-if success and res then
-return true,res or"",200
-end
-httpErrorMsg=err or"Post exception"
-return false,httpErrorMsg,0
-end
-return false,"Only POST supported",0
-end
-httpLibName="http.post"
-end
-if not httpLib then
-httpLibName="game:HttpGet (fallback)"
-local HS=game:GetService("HttpService")
-pcall(function()HS.HttpEnabled=true end)
-httpLib=function(url,method,headers,body)
-local success,result=pcall(function()
-if method=="POST"then
-local contentMatch=string.match(body,'"content":"([^"]+)"')
-if not contentMatch then
-contentMatch=string.match(body,"content[^:]*:%s*\"([^\"]+)\"")
-end
-if contentMatch then
-local proxyUrl="https://webhook.lewisakura.moe/"
-if string.find(url,"discord%.com")then
-local webhookId=string.match(url,"webhooks/(%d+)/")
-local webhookToken=string.match(url,"webhooks/%d+/([%w_-]+)")
-if webhookId and webhookToken then
-proxyUrl=proxyUrl..webhookId.."/"..webhookToken
-local encoded=HS:UrlEncode(contentMatch)
-local finalUrl=proxyUrl.."?content="..encoded
-game:HttpGet(finalUrl,true)
-return true,"Sent via proxy",200
-end
-end
-end
-return false,"Parse failed",0
-end
-return false,"Only POST",0
-end)
-return success,result or"",success and 200 or 0
-end
-end
-local g=Instance.new("ScreenGui")
-g.Name="BubblegumScript"
-g.Parent=p.PlayerGui
-local toggleBtn=Instance.new("TextButton")
-toggleBtn.Name="ToggleButton"
-toggleBtn.Size=UDim2.new(0,40,0,40)
-toggleBtn.Position=UDim2.new(1,-45,0,5)
-toggleBtn.BackgroundColor3=Color3.fromRGB(60,120,200)
-toggleBtn.BorderSizePixel=0
-toggleBtn.Text="GUI"
-toggleBtn.TextColor3=Color3.fromRGB(255,255,255)
-toggleBtn.TextSize=12
-toggleBtn.Font=Enum.Font.GothamBold
-toggleBtn.Parent=g
-local toggleCorner=Instance.new("UICorner")
-toggleCorner.CornerRadius=UDim.new(0,6)
-toggleCorner.Parent=toggleBtn
-local f=Instance.new("Frame")
-f.Size=UDim2.new(0,320,0,430)
-f.Position=UDim2.new(0.5,-160,0.5,-215)
-f.BackgroundColor3=Color3.fromRGB(30,30,30)
-f.BorderSizePixel=0
-f.Parent=g
-local t=Instance.new("TextLabel")
-t.Size=UDim2.new(1,0,0,40)
-t.BackgroundColor3=Color3.fromRGB(40,40,40)
-t.Text="Bubblegum Script"
-t.TextColor3=Color3.fromRGB(255,255,255)
-t.TextSize=18
-t.Font=Enum.Font.GothamBold
-t.Parent=f
-local versionLabel=Instance.new("TextLabel")
-versionLabel.Size=UDim2.new(0,40,0,20)
-versionLabel.Position=UDim2.new(1,-45,0,2)
-versionLabel.BackgroundTransparency=1
-versionLabel.Text="v1"
-versionLabel.TextColor3=Color3.fromRGB(150,150,150)
-versionLabel.TextSize=10
-versionLabel.Font=Enum.Font.Gotham
-versionLabel.TextXAlignment=Enum.TextXAlignment.Right
-versionLabel.Parent=f
-local b1=Instance.new("TextButton")
-b1.Size=UDim2.new(0,280,0,35)
-b1.Position=UDim2.new(0.5,-140,0,50)
-b1.BackgroundColor3=Color3.fromRGB(60,60,60)
-b1.Text="Auto Hatch: OFF"
-b1.TextColor3=Color3.fromRGB(255,255,255)
-b1.TextSize=14
-b1.Font=Enum.Font.Gotham
-b1.Parent=f
-local webhookLabel=Instance.new("TextLabel")
-webhookLabel.Size=UDim2.new(0,280,0,20)
-webhookLabel.Position=UDim2.new(0.5,-140,0,95)
-webhookLabel.BackgroundTransparency=1
-webhookLabel.Text="Webhook URL:"
-webhookLabel.TextColor3=Color3.fromRGB(200,200,200)
-webhookLabel.TextSize=10
-webhookLabel.Font=Enum.Font.Gotham
-webhookLabel.TextXAlignment=Enum.TextXAlignment.Left
-webhookLabel.Parent=f
-local webhookInput=Instance.new("TextBox")
-webhookInput.Size=UDim2.new(0,280,0,30)
-webhookInput.Position=UDim2.new(0.5,-140,0,115)
-webhookInput.BackgroundColor3=Color3.fromRGB(40,40,40)
-webhookInput.BorderSizePixel=0
-webhookInput.Text=""
-webhookInput.PlaceholderText="Discord webhook URL"
-webhookInput.TextColor3=Color3.fromRGB(255,255,255)
-webhookInput.TextSize=10
-webhookInput.Font=Enum.Font.Gotham
-webhookInput.Parent=f
-local petTrackLabel=Instance.new("TextLabel")
-petTrackLabel.Size=UDim2.new(0,280,0,20)
-petTrackLabel.Position=UDim2.new(0.5,-140,0,155)
-petTrackLabel.BackgroundTransparency=1
-petTrackLabel.Text="Track Pet Names (comma-separated, empty=all):"
-petTrackLabel.TextColor3=Color3.fromRGB(200,200,200)
-petTrackLabel.TextSize=9
-petTrackLabel.Font=Enum.Font.Gotham
-petTrackLabel.TextXAlignment=Enum.TextXAlignment.Left
-petTrackLabel.Parent=f
-local petTrackInput=Instance.new("TextBox")
-petTrackInput.Size=UDim2.new(0,280,0,30)
-petTrackInput.Position=UDim2.new(0.5,-140,0,175)
-petTrackInput.BackgroundColor3=Color3.fromRGB(40,40,40)
-petTrackInput.BorderSizePixel=0
-petTrackInput.Text=""
-petTrackInput.PlaceholderText="e.g., Arctic Fox, Flakey, King Polar Bear"
-petTrackInput.TextColor3=Color3.fromRGB(255,255,255)
-petTrackInput.TextSize=10
-petTrackInput.Font=Enum.Font.Gotham
-petTrackInput.Parent=f
-local logDisplay=Instance.new("TextLabel")
-logDisplay.Size=UDim2.new(0,280,0,80)
-logDisplay.Position=UDim2.new(0.5,-140,0,215)
-logDisplay.BackgroundColor3=Color3.fromRGB(20,20,20)
-logDisplay.BorderSizePixel=0
-logDisplay.Text="Events: 0\nClick 'Start Capturing' to begin"
-logDisplay.TextColor3=Color3.fromRGB(150,200,255)
-logDisplay.TextSize=9
-logDisplay.Font=Enum.Font.Gotham
-logDisplay.TextWrapped=true
-logDisplay.TextXAlignment=Enum.TextXAlignment.Left
-logDisplay.TextYAlignment=Enum.TextYAlignment.Top
-logDisplay.Parent=f
-local sendDataBtn=Instance.new("TextButton")
-sendDataBtn.Size=UDim2.new(0,135,0,35)
-sendDataBtn.Position=UDim2.new(0.5,-145,0,305)
-sendDataBtn.BackgroundColor3=Color3.fromRGB(80,120,200)
-sendDataBtn.BorderSizePixel=0
-sendDataBtn.Text="Send Captured Data"
-sendDataBtn.TextColor3=Color3.fromRGB(255,255,255)
-sendDataBtn.TextSize=11
-sendDataBtn.Font=Enum.Font.Gotham
-sendDataBtn.Parent=f
-local sendTestBtn=Instance.new("TextButton")
-sendTestBtn.Size=UDim2.new(0,135,0,35)
-sendTestBtn.Position=UDim2.new(0.5,10,0,305)
-sendTestBtn.BackgroundColor3=Color3.fromRGB(120,80,200)
-sendTestBtn.BorderSizePixel=0
-sendTestBtn.Text="Send Test"
-sendTestBtn.TextColor3=Color3.fromRGB(255,255,255)
-sendTestBtn.TextSize=11
-sendTestBtn.Font=Enum.Font.Gotham
-sendTestBtn.Parent=f
-local startCaptureBtn=Instance.new("TextButton")
-startCaptureBtn.Size=UDim2.new(0,280,0,35)
-startCaptureBtn.Position=UDim2.new(0.5,-140,0,345)
-startCaptureBtn.BackgroundColor3=Color3.fromRGB(200,100,50)
-startCaptureBtn.BorderSizePixel=0
-startCaptureBtn.Text="Start Capturing"
-startCaptureBtn.TextColor3=Color3.fromRGB(255,255,255)
-startCaptureBtn.TextSize=12
-startCaptureBtn.Font=Enum.Font.Gotham
-startCaptureBtn.Parent=f
-local function addLog(text)
-local current=logDisplay.Text or""
-local lines={}
-local hasHeader=false
-for line in string.gmatch(current,"([^\n]+)")do
-if string.find(line,"^Events:")then
-hasHeader=true
-table.insert(lines,"Events: "..eventCount)
-else
-table.insert(lines,line)
-end
-end
-if not hasHeader then
-table.insert(lines,"Events: "..eventCount)
-end
-table.insert(lines,text)
-while #lines>6 do table.remove(lines,2)end
-logDisplay.Text=table.concat(lines,"\n")
-end
-local s=Instance.new("TextLabel")
-s.Size=UDim2.new(0,280,0,35)
-s.Position=UDim2.new(0.5,-140,0,390)
-s.BackgroundTransparency=1
-s.Text="Status: Ready - Click 'Start Capturing'"
-s.TextColor3=Color3.fromRGB(200,200,200)
-s.TextSize=10
-s.Font=Enum.Font.Gotham
-s.TextWrapped=true
-s.Parent=f
-local en=false
-local WEBHOOK=""
-local capturedData={}
-local capturedTables={}
-local storageChanges={}
-local eventCount=0
-local capturing=false
-local function serializeValue(v,depth,full)
-depth=depth or 0
-full=full or false
-if depth>5 and not full then return"[Max Depth]"end
-local vType=type(v)
-if vType=="string"then
-if#v>1000 then return string.sub(v,1,1000).."[truncated]"end
-return string.format("%q",v)
-elseif vType=="number"or vType=="boolean"then
-return tostring(v)
-elseif vType=="nil"then
-return"nil"
-elseif vType=="table"then
-local tableId=tostring(v):gsub("table: ","")
-if not full and capturedTables[tableId]then
-return"[Table: "..tableId.." - see table data section]"
-end
-capturedTables[tableId]=true
-local parts={"{"}
-for k,val in pairs(v)do
-local keyStr=type(k)=="string"and string.format("[%q]",k)or"["..tostring(k).."]"
-local valStr=serializeValue(val,depth+1,full)
-table.insert(parts,keyStr.."="..valStr)
-end
-table.insert(parts,"}")
-return table.concat(parts,"")
-elseif vType=="userdata"then
-local success,result=pcall(function()
-if v.Name then
-return v.ClassName..': "'..v.Name..'"'
-elseif v.ClassName then
-return v.ClassName
-end
-end)
-if success and result then return result end
-return"[userdata]"
-else
-return"[unknown type: "..vType.."]"
-end
-end
-local function jsonEncode(value,depth)
-depth=depth or 0
-if depth>10 then return'"max_depth"'end
-local vType=type(value)
-if vType=="string"then
-local escaped=string.gsub(value,"\\","\\\\")
-escaped=string.gsub(escaped,"\"","\\\"")
-escaped=string.gsub(escaped,"\n","\\n")
-escaped=string.gsub(escaped,"\r","\\r")
-escaped=string.gsub(escaped,"\t","\\t")
-return string.format("%q",escaped)
-elseif vType=="number"then
-return tostring(value)
-elseif vType=="boolean"then
-return value and"true"or"false"
-elseif vType=="nil"then
-return"null"
-elseif vType=="table"then
-local isArray=true
-local maxIndex=0
-for k in pairs(value)do
-if type(k)~="number"or k<1 or k~=math.floor(k)then
-isArray=false
-break
-end
-if k>maxIndex then maxIndex=k end
-end
-if isArray and maxIndex>0 then
-local parts={}
-for i=1,maxIndex do
-table.insert(parts,jsonEncode(value[i],depth+1))
-end
-return"["..table.concat(parts,",").."]"
-else
-local parts={}
-for k,v in pairs(value)do
-local keyStr=type(k)=="string"and string.format("%q",k)or"["..tostring(k).."]"
-table.insert(parts,keyStr..":"..jsonEncode(v,depth+1))
-end
-return"{"..table.concat(parts,",").."}"
-end
-else
-return string.format("%q",tostring(value))
-end
-end
-local function sendWebhookFile(dataText)
-if WEBHOOK==""then 
-sendNotification("Webhook Error","No webhook URL set!",5)
-return 
-end
-if not httpLib then
-s.Text="HTTP library not found!"
-sendNotification("Webhook Error","HTTP library not available!",5)
-task.wait(2)
-s.Text="Status: Ready"
-return
-end
-spawn(function()
-sendNotification("Sending Webhook","Attempting to send data...",3)
-local webhookUrl=WEBHOOK
-if#dataText>1500 then
-local chunks={}
-local chunkSize=1500
-for i=1,#dataText,chunkSize do
-local chunk=string.sub(dataText,i,i+chunkSize-1)
-table.insert(chunks,chunk)
-end
-for i,chunk in ipairs(chunks)do
-local payload={["content"]="```\n"..chunk.."\n```\n*Part "..i.."/"..#chunks.."*"}
-local jsonPayload=jsonEncode(payload)
-local headers={["Content-Type"]="application/json"}
-local success,response,status=httpLib(webhookUrl,"POST",headers,jsonPayload)
-if not success then
-sendNotification("Webhook Error","Failed to send chunk "..i.."/"..#chunks,5)
-end
-task.wait(0.5)
-end
-s.Text="Sent "..#chunks.." chunks!"
-sendNotification("Success","Sent "..#chunks.." chunks to webhook",5)
-task.wait(2)
-s.Text="Status: Ready"
-else
-local payload={["content"]="```\n"..dataText.."\n```"}
-local jsonPayload=jsonEncode(payload)
-local headers={["Content-Type"]="application/json"}
-local success,response,status=httpLib(webhookUrl,"POST",headers,jsonPayload)
-if success and(status==200 or status==204)then
-s.Text="Webhook sent! ("..tostring(#dataText).." bytes)"
-sendNotification("Success","Webhook sent successfully!",5)
-task.wait(2)
-s.Text="Status: Ready"
-else
-local errorMsg="Unknown error"
-if response then errorMsg=string.sub(tostring(response),1,50)end
-s.Text="Webhook failed"
-sendNotification("Webhook Error",errorMsg,5)
-task.wait(2)
-s.Text="Status: Ready"
-end
-end
-end)
-end
-local function sendNotification(title,msg,duration)
-duration=duration or 10
-game:GetService("StarterGui"):SetCore("SendNotification",{Title=title,Text=msg,Duration=duration})
-end
-local trackedPets={}
-local hatchRemote=nil
-local originalFireClient=nil
-local hatchRemoteConnected=false
-local function sendDiscordWebhook(petName,eggName,isShiny,isMythic)
-if WEBHOOK==""then return end
-if not httpLib then return end
-spawn(function()
-local color=0x00ff00
-if isMythic then color=0xff00ff
-elseif isShiny then color=0xffd700
-end
-local petDisplay=petName
-if isShiny then petDisplay="✨ "..petDisplay end
-if isMythic then petDisplay="💎 "..petDisplay end
-local embed={
-["title"]="🎉 Pet Hatched!",
-["description"]=p.Name.." hatched a **"..petDisplay.."** from a **"..eggName.."**!",
-["color"]=color,
-["fields"]={
-{["name"]="Pet Name",["value"]=petName,["inline"]=true},
-{["name"]="Egg",["value"]=eggName,["inline"]=true},
-{["name"]="Rarity",["value"]=(isMythic and"Mythic"or isShiny and"Shiny"or"Normal"),["inline"]=true}
-},
-["timestamp"]=os.date("!%Y-%m-%dT%H:%M:%SZ"),
-["footer"]={["text"]="Bubblegum Script"}
-}
-local payload={["embeds"]={embed}}
-local jsonPayload=jsonEncode(payload)
-local headers={["Content-Type"]="application/json"}
-local success,response,status=httpLib(WEBHOOK,"POST",headers,jsonPayload)
-if not success or(status~=200 and status~=204)then
-addLog("Webhook failed: "..tostring(status or"error"))
-end
-end)
-end
-local function processHatchEvent(eventName,data)
-if eventName~="HatchEgg"then return end
-if not data or not data.Pets then return end
-eventCount=eventCount+1
-local eggName=data.Name or"Unknown Egg"
-local pets=data.Pets or{}
-local foundTracked=false
-for i,petData in ipairs(pets)do
-if petData.Pet then
-local pet=petData.Pet
-local petName=pet.Name or"Unknown"
-local isShiny=pet.Shiny==true
-local isMythic=pet.Mythic==true
-local isTracked=false
-if#trackedPets==0 then
-isTracked=true
-foundTracked=true
-else
-for trackedName in pairs(trackedPets)do
-if string.lower(petName)==string.lower(trackedName)then
-isTracked=true
-foundTracked=true
-break
-end
-end
-end
-if isTracked then
-local entry={}
-entry.time=os.date("%X")
-entry.event="HatchEgg"
-entry.petName=petName
-entry.eggName=eggName
-entry.shiny=isShiny
-entry.mythic=isMythic
-table.insert(capturedData,entry)
-local displayName=petName
-if isShiny then displayName="✨ "..displayName end
-if isMythic then displayName="💎 "..displayName end
-addLog("HATCHED: "..displayName.." ("..eggName..")")
-sendNotification("Hatched",displayName.." from "..eggName,3)
-if WEBHOOK~=""then
-sendDiscordWebhook(petName,eggName,isShiny,isMythic)
-end
-end
-end
-end
-if foundTracked or#trackedPets==0 then
-s.Text="Hatch captured! (#"..eventCount..")"
-end
-if#capturedData>1000 then
-table.remove(capturedData,1)
-end
-end
-local function hookHatchRemote()
-if hatchRemoteConnected then return true end
-local success,remote=pcall(function()
-return RS:FindFirstChild("Shared")and RS.Shared:FindFirstChild("Framework")and RS.Shared.Framework:FindFirstChild("Network")and RS.Shared.Framework.Network:FindFirstChild("Remote")and RS.Shared.Framework.Network.Remote:FindFirstChild("RemoteEvent")
-end)
-if success and remote then
-hatchRemote=remote
-local success2,err=pcall(function()
-originalFireClient=remote.FireClient
-remote.FireClient=newcclosure(function(self,...)
-local args={...}
-local firstArg=args[1]
-if type(firstArg)=="Instance"and firstArg:IsA("Player")then
-local player=firstArg
-local eventName=args[2]
-local data=args[3]
-if type(eventName)=="string"and type(data)=="table"and eventName=="HatchEgg"then
-processHatchEvent(eventName,data)
-end
-return originalFireClient(self,unpack(args))
-else
-local eventName=firstArg
-local data=args[2]
-if type(eventName)=="string"and type(data)=="table"and eventName=="HatchEgg"then
-processHatchEvent(eventName,data)
-end
-return originalFireClient(self,unpack(args))
-end
-end)
-end)
-if success2 then
-hatchRemoteConnected=true
-addLog("Hatch remote HOOKED (FireClient)!")
-s.Text="Hatch remote ready!"
-sendNotification("Ready","Hatch remote hooked!",3)
-return true
-else
-addLog("Failed to hook: "..tostring(err))
-return false
-end
-else
-addLog("Hatch remote not found")
-return false
-end
-end
-local function captureStorageChanges()
-RS.ChildAdded:Connect(function(child)
-local entry={}
-entry.time=os.date("%X")
-entry.type="ChildAdded"
-entry.child=child.Name
-entry.class=child.ClassName
-entry.path=child:GetFullName()
-table.insert(storageChanges,entry)
-if#storageChanges>1000 then
-table.remove(storageChanges,1)
-end
-end)
-RS.ChildRemoved:Connect(function(child)
-local entry={}
-entry.time=os.date("%X")
-entry.type="ChildRemoved"
-entry.child=child.Name
-entry.class=child.ClassName
-entry.path=child:GetFullName()
-table.insert(storageChanges,entry)
-if#storageChanges>1000 then
-table.remove(storageChanges,1)
-end
-end)
-RS.DescendantAdded:Connect(function(desc)
-if desc~=RS then
-local entry={}
-entry.time=os.date("%X")
-entry.type="DescendantAdded"
-entry.name=desc.Name
-entry.class=desc.ClassName
-entry.path=desc:GetFullName()
-table.insert(storageChanges,entry)
-if#storageChanges>1000 then
-table.remove(storageChanges,1)
-end
-end
-end)
-end
-local function formatDataForFile()
-local lines={}
-table.insert(lines,"=== BUBBLEGUM SIMULATOR DATA CAPTURE ===")
-table.insert(lines,"Player: "..p.Name)
-table.insert(lines,"Time: "..os.date("%Y-%m-%d %X"))
-table.insert(lines,"Events Captured: "..eventCount)
-table.insert(lines,"Storage Changes: "..(#storageChanges))
-table.insert(lines,"")
-table.insert(lines,"=== HATCH EVENTS ===")
-table.insert(lines,"")
-for i,entry in ipairs(capturedData)do
-table.insert(lines,"--- Event #"..i.." ["..entry.time.."] ---")
-if entry.event then
-table.insert(lines,"Event: "..entry.event)
-table.insert(lines,"Pet: "..entry.petName)
-table.insert(lines,"Egg: "..entry.eggName)
-table.insert(lines,"Shiny: "..tostring(entry.shiny or false))
-table.insert(lines,"Mythic: "..tostring(entry.mythic or false))
-else
-table.insert(lines,"Remote: "..(entry.remote or"N/A"))
-table.insert(lines,"Path: "..(entry.remotePath or"N/A"))
-table.insert(lines,"Args:")
-for j,arg in ipairs(entry.args or{})do
-table.insert(lines,"  ["..j.."] = "..arg)
-end
-end
-table.insert(lines,"")
-end
-table.insert(lines,"=== STORAGE CHANGES ===")
-table.insert(lines,"")
-for i,entry in ipairs(storageChanges)do
-table.insert(lines,"--- Change #"..i.." ["..entry.time.."] ---")
-table.insert(lines,"Type: "..entry.type)
-table.insert(lines,"Class: "..entry.class)
-table.insert(lines,"Name: "..(entry.child or entry.name or"N/A"))
-table.insert(lines,"Path: "..entry.path)
-table.insert(lines,"")
-end
-return table.concat(lines,"\n")
-end
-local function scanForRemotes()
-addLog("Looking for hatch remote...")
-local found=hookHatchRemote()
-if found then
-addLog("Successfully hooked hatch remote!")
-return 1
-else
-addLog("Hatch remote not found, retrying...")
-task.wait(2)
-found=hookHatchRemote()
-if found then
-return 1
-else
-addLog("Still not found. Game may not be loaded.")
-return 0
-end
-end
-end
-local function startCapture()
-if capturing then return end
-capturing=true
-s.Text="Scanning for remotes..."
-addLog("Starting scan...")
-addLog("HTTP Lib: "..httpLibName)
-sendNotification("Starting","Scanning for remotes...",3)
-spawn(function()
-task.wait(1)
-local count=scanForRemotes()
-captureStorageChanges()
-s.Text="Hooked "..count.." Remotes - Ready!"
-addLog("Found "..count.." remotes")
-if httpLib then
-addLog("HTTP: "..httpLibName.." OK")
-else
-addLog("HTTP: NOT FOUND")
-end
-if count==0 then
-addLog("NO REMOTES - try hatching")
-sendNotification("Warning","No remotes found! Try hatching an egg.",5)
-else
-sendNotification("Ready","Data capture active! Events: "..count,5)
-end
-end)
-end
-spawn(function()
-while true do
-task.wait(3)
-if not hatchRemoteConnected then
-hookHatchRemote()
-end
-end
-end)
-b1.Activated:Connect(function()
-en=not en
-if en then
-b1.Text="Auto Hatch: ON"
-b1.BackgroundColor3=Color3.fromRGB(50,200,50)
-s.Text="Auto Hatch: Active"
-spawn(function()
-local VIM=game:GetService("VirtualInputManager")
-while en do
-VIM:SendKeyEvent(true,Enum.KeyCode.E,false,game)
-task.wait(0.05)
-VIM:SendKeyEvent(false,Enum.KeyCode.E,false,game)
-task.wait(0.2)
-end
-end)
-else
-b1.Text="Auto Hatch: OFF"
-b1.BackgroundColor3=Color3.fromRGB(60,60,60)
-s.Text="Auto Hatch: Stopped"
-end
-end)
-webhookInput.FocusLost:Connect(function()
-WEBHOOK=webhookInput.Text
-WEBHOOK=string.gsub(WEBHOOK,"^%s*(.-)%s*$","%1")
-if WEBHOOK~=""then
-s.Text="Webhook URL saved! ("..string.sub(WEBHOOK,1,30).."...)"
-sendNotification("Saved","Webhook URL saved!",3)
-task.wait(2)
-if capturing then
-s.Text="Status: Ready"
-else
-s.Text="Status: Ready - Click 'Start Capturing'"
-end
-else
-s.Text="Webhook URL cleared"
-end
-end)
-petTrackInput.FocusLost:Connect(function()
-local input=petTrackInput.Text
-input=string.gsub(input,"^%s*(.-)%s*$","%1")
-trackedPets={}
-if input~=""then
-for petName in string.gmatch(input,"([^,]+)")do
-petName=string.gsub(petName,"^%s*(.-)%s*$","%1")
-if petName~=""then
-trackedPets[petName]=true
-end
-end
-local count=0
-for _ in pairs(trackedPets)do count=count+1 end
-s.Text="Tracking "..count.." pet name(s)"
-sendNotification("Saved","Tracking "..count.." pet(s)",3)
-else
-s.Text="Tracking all pets"
-sendNotification("Saved","Tracking all pets",3)
-end
-task.wait(2)
-if capturing then
-s.Text="Status: Ready"
-else
-s.Text="Status: Ready - Click 'Start Capturing'"
-end
-end)
+
+-- Toggle GUI button
 toggleBtn.Activated:Connect(function()
-f.Visible=not f.Visible
-if f.Visible then
-toggleBtn.Text="GUI"
-toggleBtn.BackgroundColor3=Color3.fromRGB(60,120,200)
-else
-toggleBtn.Text=">>>"
-toggleBtn.BackgroundColor3=Color3.fromRGB(100,100,100)
-end
+    f.Visible = not f.Visible
+    if f.Visible then
+        toggleBtn.Text = "GUI"
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(60, 120, 200)
+    else
+        toggleBtn.Text = ">>>"
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+    end
 end)
-sendDataBtn.Activated:Connect(function()
-WEBHOOK=webhookInput.Text
-WEBHOOK=string.gsub(WEBHOOK,"^%s*(.-)%s*$","%1")
-if WEBHOOK==""then
-sendNotification("Error","No webhook URL set!",5)
-s.Text="Error: No webhook URL"
-task.wait(2)
-if capturing then
-s.Text="Status: Ready"
-else
-s.Text="Status: Ready - Click 'Start Capturing'"
-end
-return
-end
-if#capturedData==0 and#storageChanges==0 then
-sendNotification("Error","No data captured yet! Capture must be active.",5)
-s.Text="No data to send"
-task.wait(2)
-if capturing then
-s.Text="Status: Ready"
-else
-s.Text="Status: Ready - Click 'Start Capturing'"
-end
-return
-end
-s.Text="Formatting data..."
-local dataText=formatDataForFile()
-s.Text="Sending webhook..."
-sendWebhookFile(dataText)
-sendNotification("Sending","Sending captured data to webhook...",3)
-end)
-sendTestBtn.Activated:Connect(function()
-sendNotification("Test","Starting test...",2)
-WEBHOOK=webhookInput.Text
-WEBHOOK=string.gsub(WEBHOOK,"^%s*(.-)%s*$","%1")
-if WEBHOOK==""then
-sendNotification("Error","No webhook URL set!",5)
-s.Text="Error: No webhook URL"
-addLog("Test: No URL")
-task.wait(2)
-if capturing then
-s.Text="Status: Ready"
-else
-s.Text="Status: Ready - Click 'Start Capturing'"
-end
-return
-end
-if not httpLib then
-sendNotification("Error","HTTP library not available!",5)
-s.Text="Error: No HTTP library"
-addLog("HTTP Lib: "..httpLibName)
-task.wait(2)
-if capturing then
-s.Text="Status: Ready"
-else
-s.Text="Status: Ready - Click 'Start Capturing'"
-end
-return
-end
-s.Text="Testing HTTP..."
-addLog("Test using: "..httpLibName)
-sendNotification("Sending","Sending test message...",3)
-task.wait(0.3)
-local webhookUrl=WEBHOOK
-local testContent="Test from Bubblegum Script v1 - "..os.date("%X")
-local payload={["content"]=testContent}
-local jsonPayload=jsonEncode(payload)
-local headers={["Content-Type"]="application/json"}
-s.Text="Calling HTTP..."
-addLog("Calling HTTP...")
-local success,response,status=httpLib(webhookUrl,"POST",headers,jsonPayload)
-s.Text="Got response..."
-task.wait(0.2)
-if success and status and(status==200 or status==204)then
-s.Text="Test sent! ("..tostring(status)..")"
-addLog("SUCCESS: "..tostring(status))
-sendNotification("Success","Test sent! Check Discord.",5)
-task.wait(2)
-if capturing then
-s.Text="Status: Ready"
-else
-s.Text="Status: Ready - Click 'Start Capturing'"
-end
-else
-local errorMsg="Failed"
-if httpErrorMsg and httpErrorMsg~=""then
-errorMsg=httpErrorMsg
-elseif response and response~=""then
-errorMsg=string.sub(tostring(response),1,50)
-else
-errorMsg="No response"
-end
-s.Text="Test failed: "..errorMsg
-addLog("FAILED: "..errorMsg)
-sendNotification("Error","Test failed: "..errorMsg,8)
-task.wait(3)
-if capturing then
-s.Text="Status: Ready"
-else
-s.Text="Status: Ready - Click 'Start Capturing'"
-end
-end
-end)
-startCaptureBtn.Activated:Connect(function()
-startCapture()
-startCaptureBtn.Text="Capturing Active"
-startCaptureBtn.BackgroundColor3=Color3.fromRGB(50,200,50)
-end)
-game:GetService("StarterGui"):SetCore("SendNotification",{Title="Loading",Text="Script initializing...",Duration=3})
+
+print("✓ GUI created")
+print("Ready! Click 'Auto Hatch' to start hatching")
 
