@@ -9,7 +9,7 @@ local p = P.LocalPlayer
 
 print("========================================")
 print("BUBBLEGUM AUTO HATCH & NOTIFIER")
-print("Version: Final")
+print("Version: 2.0")
 print("========================================")
 
 -- Load required modules
@@ -229,13 +229,13 @@ local function sendDiscordNotificationInternal(petName, shiny, mythic, eggName, 
         embedColor = 9807270 -- Grey
     end
     
-    -- Build mention
-    local mention = discordUserID ~= "" and ("<@" .. discordUserID .. "> ") or ""
+    -- Build mention (for Discord ping)
+    local mention = discordUserID ~= "" and ("<@" .. discordUserID .. ">") or ""
     
-    -- Build embed (always use attempt 1 format)
+    -- Build embed (always use full format, no simplification)
     local embed = {
         title = "🎉 Congratulations!",
-        description = mention .. "**" .. playerName .. "** hatched **" .. fullPetName .. "**!",
+        description = "**" .. playerName .. "** hatched **" .. fullPetName .. "**!",
         color = embedColor,
         fields = {
             {
@@ -261,8 +261,9 @@ local function sendDiscordNotificationInternal(petName, shiny, mythic, eggName, 
     -- Images would need to be hosted externally or converted to a format Discord accepts
     -- For now, we'll skip thumbnails to avoid 400 errors
     
+    -- Put mention in content field (required for Discord to actually ping)
     local payload = {
-        content = mention,
+        content = mention ~= "" and mention or nil,
         embeds = {embed}
     }
     
@@ -397,8 +398,7 @@ local function connectToEvents()
                                 if rarity == "Legendary" or rarity == "Secret" then
                                     print(">>> " .. rarity .. " DETECTED! <<<")
                                     
-                                    -- Send notifications
-                                    sendInGameNotification(petName, shiny, mythic, rarity)
+                                    -- Send webhook only (no in-game notifications)
                                     sendDiscordNotification(petName, shiny, mythic, eggName, rarity)
                                 end
                             end
@@ -443,7 +443,7 @@ f.Parent = g
 local title = Instance.new("TextLabel")
 title.Size = UDim2.new(1, -50, 0, 40)
 title.BackgroundColor3 = Color3.fromRGB(50, 150, 50)
-title.Text = "Auto Hatch & Notifier"
+title.Text = "Auto Hatch & Notifier v2"
 title.TextColor3 = Color3.fromRGB(255, 255, 255)
 title.TextSize = 16
 title.Font = Enum.Font.GothamBold
