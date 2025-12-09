@@ -366,7 +366,7 @@ f.Parent = g
 
 -- Title bar
 local title = Instance.new("TextLabel")
-title.Size = UDim2.new(1, 0, 0, 40)
+title.Size = UDim2.new(1, -50, 0, 40)
 title.BackgroundColor3 = Color3.fromRGB(50, 150, 50)
 title.Text = "Auto Hatch & Notifier"
 title.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -374,6 +374,72 @@ title.TextSize = 16
 title.Font = Enum.Font.GothamBold
 title.BorderSizePixel = 0
 title.Parent = f
+
+-- Close button (red X)
+local closeXBtn = Instance.new("TextButton")
+closeXBtn.Size = UDim2.new(0, 40, 0, 40)
+closeXBtn.Position = UDim2.new(1, -40, 0, 0)
+closeXBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+closeXBtn.Text = "✕"
+closeXBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeXBtn.TextSize = 20
+closeXBtn.Font = Enum.Font.GothamBold
+closeXBtn.BorderSizePixel = 0
+closeXBtn.Parent = f
+
+-- Confirmation dialog (initially hidden)
+local confirmFrame = Instance.new("Frame")
+confirmFrame.Size = UDim2.new(0, 300, 0, 150)
+confirmFrame.Position = UDim2.new(0.5, -150, 0.5, -75)
+confirmFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+confirmFrame.BorderSizePixel = 2
+confirmFrame.BorderColor3 = Color3.fromRGB(200, 50, 50)
+confirmFrame.Visible = false
+confirmFrame.ZIndex = 10
+confirmFrame.Parent = g
+
+local confirmTitle = Instance.new("TextLabel")
+confirmTitle.Size = UDim2.new(1, 0, 0, 40)
+confirmTitle.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+confirmTitle.Text = "Close Script?"
+confirmTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+confirmTitle.TextSize = 16
+confirmTitle.Font = Enum.Font.GothamBold
+confirmTitle.BorderSizePixel = 0
+confirmTitle.Parent = confirmFrame
+
+local confirmText = Instance.new("TextLabel")
+confirmText.Size = UDim2.new(0, 280, 0, 50)
+confirmText.Position = UDim2.new(0, 10, 0, 45)
+confirmText.BackgroundTransparency = 1
+confirmText.Text = "Are you sure you want to close the script?\nAll functionality will stop."
+confirmText.TextColor3 = Color3.fromRGB(255, 255, 255)
+confirmText.TextSize = 12
+confirmText.Font = Enum.Font.Gotham
+confirmText.TextWrapped = true
+confirmText.Parent = confirmFrame
+
+local yesBtn = Instance.new("TextButton")
+yesBtn.Size = UDim2.new(0, 120, 0, 35)
+yesBtn.Position = UDim2.new(0, 20, 1, -50)
+yesBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+yesBtn.Text = "Yes, Close"
+yesBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+yesBtn.TextSize = 12
+yesBtn.Font = Enum.Font.GothamBold
+yesBtn.BorderSizePixel = 0
+yesBtn.Parent = confirmFrame
+
+local noBtn = Instance.new("TextButton")
+noBtn.Size = UDim2.new(0, 120, 0, 35)
+noBtn.Position = UDim2.new(1, -140, 1, -50)
+noBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+noBtn.Text = "No, Cancel"
+noBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+noBtn.TextSize = 12
+noBtn.Font = Enum.Font.GothamBold
+noBtn.BorderSizePixel = 0
+noBtn.Parent = confirmFrame
 
 -- Auto Hatch button
 local autoHatchBtn = Instance.new("TextButton")
@@ -512,6 +578,29 @@ userIDInput.FocusLost:Connect(function(enterPressed)
     if id ~= "" then
         statusLabel.Text = "Status: User ID saved\nYou will be pinged in notifications"
     end
+end)
+
+-- Close X button - opens confirmation dialog
+closeXBtn.Activated:Connect(function()
+    confirmFrame.Visible = true
+end)
+
+-- Yes button - closes everything
+yesBtn.Activated:Connect(function()
+    -- Stop auto hatch
+    autoHatchEnabled = false
+    
+    -- Destroy GUI
+    g:Destroy()
+    
+    -- Stop script
+    print("Script closed by user")
+    error("Script closed")
+end)
+
+-- No button - closes confirmation dialog
+noBtn.Activated:Connect(function()
+    confirmFrame.Visible = false
 end)
 
 -- Toggle GUI button
