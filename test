@@ -28,6 +28,10 @@ local discordUserID = ""
 local webhookQueue = {}
 local isSendingWebhook = false
 
+-- Script state
+local scriptActive = true
+local hatchEventConnection = nil
+
 -- Load modules
 local function loadModules()
     -- Load Remote
@@ -283,7 +287,7 @@ end
 
 -- Process webhook queue
 local function processWebhookQueue()
-    if isSendingWebhook or #webhookQueue == 0 then
+    if isSendingWebhook or #webhookQueue == 0 or not scriptActive then
         return
     end
     
@@ -291,7 +295,7 @@ local function processWebhookQueue()
     isSendingWebhook = true
     
     spawn(function()
-        while #webhookQueue > 0 do
+        while #webhookQueue > 0 and scriptActive do
             local webhookData = table.remove(webhookQueue, 1)
             local petName = webhookData.petName
             local shiny = webhookData.shiny
@@ -332,6 +336,11 @@ end
 
 -- Public function to queue webhook (handles rate limiting)
 local function sendDiscordNotification(petName, shiny, mythic, eggName, rarity, pet)
+    -- Don't process if script is closed
+    if not scriptActive then
+        return
+    end
+    
     print("sendDiscordNotification called for: " .. tostring(petName))
     
     if webhookURL == "" then
@@ -373,7 +382,12 @@ local function connectToEvents()
     end
     
     local success, err = pcall(function()
-        Remote.Event("HatchEgg"):Connect(function(hatchedTable)
+        hatchEventConnection = Remote.Event("HatchEgg"):Connect(function(hatchedTable)
+            -- Don't process if script is closed
+            if not scriptActive then
+                return
+            end
+            
             print("=== HatchEgg Event Fired ===")
             
             if type(hatchedTable) == "table" then
@@ -621,6 +635,11 @@ toggleBtn.Parent = g
 
 -- Auto Hatch functionality
 autoHatchBtn.Activated:Connect(function()
+    -- Don't process if script is closed
+    if not scriptActive then
+        return
+    end
+    
     autoHatchEnabled = not autoHatchEnabled
     
     if autoHatchEnabled then
@@ -629,7 +648,7 @@ autoHatchBtn.Activated:Connect(function()
         
         -- Start E key spam
         spawn(function()
-            while autoHatchEnabled do
+            while autoHatchEnabled and scriptActive do
                 VIM:SendKeyEvent(true, Enum.KeyCode.E, false, game)
                 task.wait(0.05)
                 VIM:SendKeyEvent(false, Enum.KeyCode.E, false, game)
@@ -672,14 +691,32 @@ end)
 
 -- Yes button - closes everything
 yesBtn.Activated:Connect(function()
+    print("Closing script...")
+    
+    -- Mark script as inactive (stops all processing)
+    scriptActive = false
+    
     -- Stop auto hatch
     autoHatchEnabled = false
     
+    -- Disconnect event connection
+    if hatchEventConnection then
+        hatchEventConnection:Disconnect()
+        hatchEventConnection = nil
+        print("✓ Event connection disconnected")
+    end
+    
+    -- Clear webhook queue
+    webhookQueue = {}
+    isSendingWebhook = false
+    print("✓ Webhook queue cleared")
+    
     -- Destroy GUI
     g:Destroy()
+    print("✓ GUI destroyed")
     
     -- Stop script
-    print("Script closed by user")
+    print("Script closed by user - all functionality stopped")
     error("Script closed")
 end)
 
