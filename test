@@ -54,13 +54,23 @@ end
 
 loadModules()
 
--- HTTP for Delta Mobile
+-- HTTP for Delta Mobile (using the working method from testing)
 local httpLib = nil
+local httpLibName = nil
 if request then
     httpLib = function(url, method, headers, body)
-        local res = request({Url = url, Method = method, Headers = headers, Body = body})
-        return res.Success or res.success, res.Body or res.body, res.StatusCode
+        local success, res, err = pcall(function()
+            return request({Url=url, Method=method, Headers=headers or {}, Body=body})
+        end)
+        if success and res then
+            local status = res.StatusCode or (res.Success and 200 or (res.success and 200 or 0))
+            local body = res.Body or res.body or ""
+            local ok = res.Success or res.success or status == 200 or status == 204
+            return ok, body, status
+        end
+        return false, err or "Request exception", 0
     end
+    httpLibName = "request"
 end
 
 -- JSON encoder (simplified for Discord webhooks)
@@ -116,7 +126,10 @@ end
 
 -- Send Discord webhook
 local function sendDiscordNotification(petName, shiny, mythic, eggName, rarity)
-    if not httpLib or webhookURL == "" then return end
+    if not httpLib or webhookURL == "" then 
+        print("✗ Cannot send: httpLib=" .. tostring(httpLib) .. ", webhookURL=" .. tostring(webhookURL))
+        return 
+    end
     
     -- Build pet prefix
     local prefix = ""
@@ -139,7 +152,7 @@ local function sendDiscordNotification(petName, shiny, mythic, eggName, rarity)
     local embed = {
         title = "🎉 " .. rarity .. " Pet Hatched!",
         description = message,
-        color = rarity == "Secret" and 0xff0000 or 0xffaa00, -- Red for secret, orange for legendary
+        color = rarity == "Secret" and 16711680 or 16755200, -- Red for secret, orange for legendary
         fields = {
             {
                 name = "Pet",
@@ -174,44 +187,127 @@ local function sendDiscordNotification(petName, shiny, mythic, eggName, rarity)
     local json = jsonEncode(payload)
     local headers = {["Content-Type"] = "application/json"}
     
+    print("Sending webhook for " .. rarity .. " pet: " .. petName)
     local success, _, status = httpLib(webhookURL, "POST", headers, json)
     if success and (status == 200 or status == 204) then
-        print("✓ Discord notification sent!")
+        print("✓ Discord notification sent! Status: " .. tostring(status))
     else
-        print("✗ Discord notification failed: " .. tostring(status))
+        print("✗ Discord notification failed! Success: " .. tostring(success) .. ", Status: " .. tostring(status))
     end
 end
 
+-- Send in-game notification
+local function sendInGameNotification(petName, shiny, mythic, rarity)
+    local prefix = ""
+    if shiny and mythic then
+        prefix = "Shiny Mythic "
+    elseif shiny then
+        prefix = "Shiny "
+    elseif mythic then
+        prefix = "Mythic "
+    end
+    
+    game:GetService("StarterGui"):SetCore("SendNotification", {
+        Title = "🎉 " .. rarity .. " Pet Hatched!",
+        Text = prefix .. petName,
+        Duration = 5,
+        Button1 = "OK"
+    })
+end
+
 -- Connect to HatchEgg event
-if Remote then
-    Remote.Event("HatchEgg"):Connect(function(hatchedTable)
-        if type(hatchedTable) == "table" and hatchedTable.Pets then
-            local eggName = hatchedTable.Name
+local function connectToEvents()
+    if not Remote then
+        print("✗ Remote module not loaded!")
+        if statusLabel then
+            statusLabel.Text = "Status: ERROR - Remote module not loaded!"
+            statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+        end
+        return false
+    end
+    
+    if not ItemUtil then
+        print("✗ ItemUtil not loaded!")
+        if statusLabel then
+            statusLabel.Text = "Status: ERROR - ItemUtil not loaded!"
+            statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+        end
+        return false
+    end
+    
+    local success, err = pcall(function()
+        Remote.Event("HatchEgg"):Connect(function(hatchedTable)
+            print("=== HatchEgg Event Fired ===")
             
-            for i = 1, 20 do
-                local petData = hatchedTable.Pets[i]
-                if not petData then break end
-                
-                if type(petData) == "table" and petData.Pet then
-                    local pet = petData.Pet
-                    local petName = pet.Name
-                    local shiny = pet.Shiny == true
-                    local mythic = pet.Mythic == true
+            if type(hatchedTable) == "table" then
+                print("hatchedTable is table")
+                if hatchedTable.Pets then
+                    print("Pets found: " .. tostring(type(hatchedTable.Pets)))
+                    local eggName = hatchedTable.Name
+                    print("Egg: " .. tostring(eggName))
                     
-                    if petName and ItemUtil then
-                        local rarity = ItemUtil:GetRarity(pet)
+                    for i = 1, 20 do
+                        local petData = hatchedTable.Pets[i]
+                        if not petData then break end
                         
-                        -- Check if Legendary or Secret
-                        if rarity == "Legendary" or rarity == "Secret" then
-                            sendDiscordNotification(petName, shiny, mythic, eggName, rarity)
+                        if type(petData) == "table" and petData.Pet then
+                            local pet = petData.Pet
+                            local petName = pet.Name
+                            local shiny = pet.Shiny == true
+                            local mythic = pet.Mythic == true
+                            
+                            print("Pet " .. i .. ": " .. tostring(petName) .. " (Shiny: " .. tostring(shiny) .. ", Mythic: " .. tostring(mythic) .. ")")
+                            
+                            if petName and ItemUtil then
+                                local rarity = ItemUtil:GetRarity(pet)
+                                print("Rarity: " .. tostring(rarity))
+                                
+                                -- Check if Legendary or Secret
+                                if rarity == "Legendary" or rarity == "Secret" then
+                                    print(">>> " .. rarity .. " DETECTED! <<<")
+                                    
+                                    -- Update status
+                                    if statusLabel then
+                                        statusLabel.Text = "Status: " .. rarity .. " hatched!\n" .. petName
+                                        statusLabel.TextColor3 = rarity == "Secret" and Color3.fromRGB(255, 100, 100) or Color3.fromRGB(255, 200, 100)
+                                    end
+                                    
+                                    -- Send notifications
+                                    sendInGameNotification(petName, shiny, mythic, rarity)
+                                    sendDiscordNotification(petName, shiny, mythic, eggName, rarity)
+                                end
+                            end
                         end
                     end
+                else
+                    print("✗ No Pets in hatchedTable")
                 end
+            else
+                print("✗ hatchedTable is not a table: " .. type(hatchedTable))
             end
-        end
+        end)
     end)
-    print("✓ Connected to HatchEgg events")
+    
+    if success then
+        print("✓ Connected to HatchEgg events")
+        if statusLabel then
+            statusLabel.Text = "Status: Connected to events\nWaiting for Legendary/Secret..."
+            statusLabel.TextColor3 = Color3.fromRGB(150, 255, 150)
+        end
+        return true
+    else
+        print("✗ Failed to connect: " .. tostring(err))
+        if statusLabel then
+            statusLabel.Text = "Status: Connection failed!\n" .. tostring(err)
+            statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+        end
+        return false
+    end
 end
+
+-- Connect after modules load
+task.wait(1)
+connectToEvents()
 
 -- GUI
 local g = Instance.new("ScreenGui")
@@ -301,12 +397,12 @@ userIDInput.Font = Enum.Font.Gotham
 userIDInput.BorderSizePixel = 0
 userIDInput.Parent = f
 
--- Status label
+-- Status label (for debugging)
 local statusLabel = Instance.new("TextLabel")
-statusLabel.Size = UDim2.new(0, 320, 0, 60)
+statusLabel.Size = UDim2.new(0, 320, 0, 120)
 statusLabel.Position = UDim2.new(0, 15, 0, 230)
 statusLabel.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-statusLabel.Text = "Status: Ready\nEnter webhook URL to enable notifications"
+statusLabel.Text = "Status: Loading modules...\nWaiting for connection..."
 statusLabel.TextColor3 = Color3.fromRGB(150, 255, 150)
 statusLabel.TextSize = 11
 statusLabel.Font = Enum.Font.Gotham
@@ -314,18 +410,6 @@ statusLabel.TextWrapped = true
 statusLabel.BorderSizePixel = 0
 statusLabel.Parent = f
 
--- Info label
-local infoLabel = Instance.new("TextLabel")
-infoLabel.Size = UDim2.new(0, 320, 0, 80)
-infoLabel.Position = UDim2.new(0, 15, 0, 300)
-infoLabel.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-infoLabel.Text = "Detects: Legendary & Secret pets\nAuto Hatch: Presses E every 0.2s\nToggle GUI: Top right button"
-infoLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-infoLabel.TextSize = 10
-infoLabel.Font = Enum.Font.Gotham
-infoLabel.TextWrapped = true
-infoLabel.BorderSizePixel = 0
-infoLabel.Parent = f
 
 -- Toggle GUI button (top right)
 local toggleBtn = Instance.new("TextButton")
