@@ -149,10 +149,17 @@ end
 
 -- Process webhook queue
 local function processWebhookQueue()
-    if isSendingWebhook or #webhookQueue == 0 then
+    if isSendingWebhook then
+        print("Already processing queue, skipping...")
         return
     end
     
+    if #webhookQueue == 0 then
+        print("Queue is empty, nothing to process")
+        return
+    end
+    
+    print("Starting to process webhook queue. Items: " .. #webhookQueue)
     isSendingWebhook = true
     
     spawn(function()
@@ -163,6 +170,8 @@ local function processWebhookQueue()
             local mythic = webhookData.mythic
             local eggName = webhookData.eggName
             local rarity = webhookData.rarity
+            
+            print("Processing webhook for: " .. tostring(petName))
             
             -- Try sending with retry on rate limit
             local maxRetries = 5
@@ -187,6 +196,7 @@ local function processWebhookQueue()
             end
         end
         
+        print("Queue processing complete")
         isSendingWebhook = false
     end)
 end
@@ -291,6 +301,20 @@ end
 
 -- Public function to queue webhook (handles rate limiting)
 local function sendDiscordNotification(petName, shiny, mythic, eggName, rarity)
+    print("sendDiscordNotification called for: " .. tostring(petName))
+    print("  webhookURL: " .. (webhookURL ~= "" and "SET" or "EMPTY"))
+    print("  httpLib: " .. tostring(httpLib))
+    
+    if webhookURL == "" then
+        print("✗ Webhook URL not set! Cannot send notification.")
+        return
+    end
+    
+    if not httpLib then
+        print("✗ HTTP library not available! Cannot send notification.")
+        return
+    end
+    
     -- Add to queue
     table.insert(webhookQueue, {
         petName = petName,
@@ -299,6 +323,8 @@ local function sendDiscordNotification(petName, shiny, mythic, eggName, rarity)
         eggName = eggName,
         rarity = rarity
     })
+    
+    print("Added to queue. Queue size: " .. #webhookQueue)
     
     -- Start processing queue if not already processing
     processWebhookQueue()
@@ -397,9 +423,12 @@ local function connectToEvents()
                                 -- Check if Legendary or Secret
                                 if rarity == "Legendary" or rarity == "Secret" then
                                     print(">>> " .. rarity .. " DETECTED! <<<")
+                                    print("Calling sendDiscordNotification...")
                                     
                                     -- Send webhook only (no in-game notifications)
                                     sendDiscordNotification(petName, shiny, mythic, eggName, rarity)
+                                else
+                                    print("Pet is " .. rarity .. " (not Legendary/Secret, skipping)")
                                 end
                             end
                         end
@@ -628,6 +657,7 @@ end)
 webhookInput.FocusLost:Connect(function(enterPressed)
     local url = webhookInput.Text:gsub("^%s*(.-)%s*$", "%1")
     webhookURL = url
+    print("Webhook URL saved: " .. (url ~= "" and "SET (" .. string.sub(url, 1, 50) .. "...)" or "EMPTY"))
 end)
 
 -- Discord User ID input handler
