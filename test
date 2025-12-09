@@ -479,6 +479,7 @@ local function forceMobileMode()
     end)
     
     -- Method 2: Simulate a tap on the screen using VirtualInputManager
+    -- Click below the GUI to avoid clicking buttons
     local success2 = pcall(function()
         local camera = workspace.CurrentCamera
         if camera and VIM then
@@ -486,10 +487,22 @@ local function forceMobileMode()
             local centerX = math.floor(viewportSize.X / 2)
             local centerY = math.floor(viewportSize.Y / 2)
             
-            -- Send touch tap at center of screen
-            VIM:SendMouseButtonEvent(centerX, centerY, 0, true, game, 1)
+            -- GUI frame is at center - 175, center - 120 with size 350x240
+            -- So GUI spans from (center-175, center-120) to (center+175, center+120)
+            -- Click below the GUI, safely away from it
+            -- Position: centerX (same X as center), centerY + 250 (well below GUI which ends at centerY + 120)
+            local safeX = centerX
+            local safeY = centerY + 250
+            
+            -- Make sure we're not too close to bottom edge
+            if safeY > viewportSize.Y - 50 then
+                safeY = viewportSize.Y - 100
+            end
+            
+            -- Send touch tap at safe position (below GUI)
+            VIM:SendMouseButtonEvent(safeX, safeY, 0, true, game, 1)
             task.wait(0.01)
-            VIM:SendMouseButtonEvent(centerX, centerY, 0, false, game, 1)
+            VIM:SendMouseButtonEvent(safeX, safeY, 0, false, game, 1)
         end
     end)
     
