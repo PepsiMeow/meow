@@ -31,6 +31,21 @@ local isSendingWebhook = false
 -- Script state
 local scriptActive = true
 local hatchEventConnection = nil
+local function restoreMobileInput()
+    -- Try to force the client back to touch/mobile input by sending a fake tap.
+    -- This is best-effort; if SendTouchEvent isn't available it will safely skip.
+    local cam = workspace.CurrentCamera
+    if not cam then return end
+    local size = cam.ViewportSize
+    local x = size.X / 2
+    local y = size.Y / 2
+    if VIM and VIM.SendTouchEvent then
+        pcall(function()
+            VIM:SendTouchEvent(x, y, 0, true, game, nil)
+            VIM:SendTouchEvent(x, y, 0, false, game, nil)
+        end)
+    end
+end
 
 -- Load modules
 local function loadModules()
@@ -449,6 +464,56 @@ end
 task.wait(1)
 connectToEvents()
 
+-- Function to force game back to mobile input mode
+local function forceMobileMode()
+    -- Try multiple methods to force mobile mode
+    
+    -- Method 1: Try to access and set the game's InputMode module if it exists
+    local success1 = pcall(function()
+        local inputModeModule = require(RS.Client.Framework.Services.InputMode)
+        if inputModeModule and inputModeModule.SetMode then
+            inputModeModule:SetMode("Touch")
+        elseif inputModeModule then
+            inputModeModule.Mode = "Touch"
+        end
+    end)
+    
+    -- Method 2: Simulate a tap on the screen using VirtualInputManager
+    local success2 = pcall(function()
+        local camera = workspace.CurrentCamera
+        if camera and VIM then
+            local viewportSize = camera.ViewportSize
+            local centerX = math.floor(viewportSize.X / 2)
+            local centerY = math.floor(viewportSize.Y / 2)
+            
+            -- Send touch tap at center of screen
+            VIM:SendMouseButtonEvent(centerX, centerY, 0, true, game, 1)
+            task.wait(0.01)
+            VIM:SendMouseButtonEvent(centerX, centerY, 0, false, game, 1)
+        end
+    end)
+    
+    -- Method 3: Try to trigger mobile controls by accessing touch controls
+    local success3 = pcall(function()
+        -- Enable touch controls if they exist
+        if UIS.TouchEnabled then
+            local touchGui = p:FindFirstChild("PlayerGui")
+            if touchGui then
+                local touchControlFrame = touchGui:FindFirstChild("TouchGui")
+                if touchControlFrame then
+                    touchControlFrame.Enabled = true
+                end
+            end
+        end
+    end)
+    
+    if success1 or success2 or success3 then
+        print("✓ Attempted to force mobile input mode")
+    else
+        print("⚠ Could not force mobile mode (game will auto-detect after 10s)")
+    end
+end
+
 -- GUI
 local g = Instance.new("ScreenGui")
 g.Name = "BubblegumAutoHatch"
@@ -658,6 +723,9 @@ autoHatchBtn.Activated:Connect(function()
     else
         autoHatchBtn.Text = "Auto Hatch: OFF"
         autoHatchBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+        
+        -- Force game back to mobile input mode
+        forceMobileMode()
     end
 end)
 
