@@ -214,14 +214,19 @@ local function sendDiscordNotificationInternal(petName, shiny, mythic, eggName, 
     -- Get pet image
     local petImage = getPetImage(petName, shiny, mythic)
     
-    -- Determine color based on pet type
-    local embedColor = 9807270 -- Grey for normal/legendary/secret pets
-    if shiny and mythic then
+    -- Determine color based on pet type (check shiny/mythic first, then rarity)
+    local embedColor = 9807270 -- Grey for normal pets (default)
+    
+    -- Priority: Shiny Mythic > Shiny > Mythic > Rarity
+    if shiny == true and mythic == true then
         embedColor = 16711680 -- Bright red for Shiny Mythic
-    elseif shiny then
+    elseif shiny == true then
         embedColor = 16766720 -- Gold/yellow-orange for Shiny
-    elseif mythic then
+    elseif mythic == true then
         embedColor = 10181046 -- Purple-pink for Mythic
+    else
+        -- Not shiny or mythic - always grey regardless of rarity
+        embedColor = 9807270 -- Grey
     end
     
     -- Build mention
@@ -252,27 +257,9 @@ local function sendDiscordNotificationInternal(petName, shiny, mythic, eggName, 
         timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
     }
     
-    -- Only add thumbnail if image URL is valid Discord format
-    if petImage and type(petImage) == "string" and petImage ~= "" then
-        -- Discord requires https:// URLs or rbxassetid:// format
-        -- Convert rbxassetid:// to https:// if needed
-        local imageUrl = petImage
-        if string.match(petImage, "^rbxassetid://") then
-            -- Extract asset ID
-            local assetId = string.match(petImage, "rbxassetid://(%d+)")
-            if assetId then
-                -- Convert to Roblox CDN URL
-                imageUrl = "https://www.roblox.com/asset/?id=" .. assetId
-            end
-        end
-        
-        -- Only add if it's a valid https:// URL
-        if string.match(imageUrl, "^https://") then
-            embed.thumbnail = {
-                url = imageUrl
-            }
-        end
-    end
+    -- Don't add thumbnail - Discord doesn't accept Roblox asset URLs directly
+    -- Images would need to be hosted externally or converted to a format Discord accepts
+    -- For now, we'll skip thumbnails to avoid 400 errors
     
     local payload = {
         content = mention,
@@ -296,8 +283,8 @@ local function sendDiscordNotificationInternal(petName, shiny, mythic, eggName, 
         print("✗ Webhook failed!")
         print("  Status: " .. tostring(status))
         print("  Response: " .. tostring(response))
-        -- For non-429 errors, still return false to retry (might be temporary)
-        return false
+        -- For non-429 errors, return true to not retry (400 is likely permanent issue)
+        return true
     end
 end
 
@@ -316,8 +303,32 @@ local function sendDiscordNotification(petName, shiny, mythic, eggName, rarity)
     processWebhookQueue()
 end
 
--- Send in-game notification
+-- Track recent notifications to prevent duplicates
+local recentNotifications = {}
+local notificationCooldown = 2 -- seconds
+
+-- Send in-game notification (with deduplication)
 local function sendInGameNotification(petName, shiny, mythic, rarity)
+    -- Create unique key for this pet
+    local key = petName .. "_" .. tostring(shiny) .. "_" .. tostring(mythic) .. "_" .. rarity
+    local currentTime = tick()
+    
+    -- Check if we've sent this notification recently
+    if recentNotifications[key] and (currentTime - recentNotifications[key]) < notificationCooldown then
+        print("Skipping duplicate notification for: " .. key)
+        return
+    end
+    
+    -- Mark as sent
+    recentNotifications[key] = currentTime
+    
+    -- Clean old entries (older than cooldown)
+    for k, v in pairs(recentNotifications) do
+        if currentTime - v > notificationCooldown then
+            recentNotifications[k] = nil
+        end
+    end
+    
     local prefix = ""
     if shiny and mythic then
         prefix = "Shiny Mythic "
