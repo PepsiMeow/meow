@@ -16,6 +16,8 @@ print("========================================")
 local Remote = nil
 local ItemUtil = nil
 local PetsData = nil
+local PetUtil = nil
+local FormatCommas = nil
 
 -- Settings
 local autoHatchEnabled = false
@@ -53,6 +55,24 @@ local function loadModules()
     if success3 and petsData then
         PetsData = petsData
         print("✓ Loaded Pets data")
+    end
+    
+    -- Load PetUtil for chance calculation
+    local success4, petUtil = pcall(function()
+        return require(RS.Shared.Utils.Stats.PetUtil)
+    end)
+    if success4 and petUtil then
+        PetUtil = petUtil
+        print("✓ Loaded PetUtil")
+    end
+    
+    -- Load FormatCommas for number formatting
+    local success5, formatCommas = pcall(function()
+        return require(RS.Shared.Framework.Utilities.String.FormatCommas)
+    end)
+    if success5 and formatCommas then
+        FormatCommas = formatCommas
+        print("✓ Loaded FormatCommas")
     end
 end
 
@@ -129,7 +149,7 @@ local function jsonEncode(t)
 end
 
 -- Function to send webhook (with 429 retry logic) - MUST be defined first
-local function sendDiscordNotificationInternal(petName, shiny, mythic, eggName, rarity)
+local function sendDiscordNotificationInternal(petName, shiny, mythic, eggName, rarity, pet)
     if not httpLib or webhookURL == "" then 
         print("✗ Cannot send: httpLib=" .. tostring(httpLib) .. ", webhookURL=" .. tostring(webhookURL))
         return true -- Return true to not retry if webhook not configured
@@ -164,28 +184,72 @@ local function sendDiscordNotificationInternal(petName, shiny, mythic, eggName, 
     -- Build mention (for Discord ping)
     local mention = discordUserID ~= "" and ("<@" .. discordUserID .. ">") or ""
     
+    -- Calculate probability if PetUtil is available
+    local probabilityText = nil
+    if PetUtil and pet then
+        local success, petChance = pcall(function()
+            return PetUtil:GetChance(pet)
+        end)
+        if success and petChance and petChance > 0 then
+            local denominator = math.ceil(100 / petChance)
+            if FormatCommas then
+                probabilityText = "1/" .. FormatCommas(denominator)
+            else
+                -- Manual formatting for large numbers
+                local formatted = tostring(denominator)
+                -- Add commas every 3 digits from right
+                formatted = formatted:reverse():gsub("(%d%d%d)", "%1,"):reverse()
+                formatted = formatted:gsub("^,", "")
+                probabilityText = "1/" .. formatted
+            end
+        end
+    end
+    
+    -- Determine "a" or "an" for the pet name
+    -- Use "a" if shiny/mythic/shiny mythic (regardless of vowel)
+    -- Use "an" if pet name starts with a vowel AND is not shiny/mythic
+    -- Use "a" if pet name starts with a consonant
+    local article = "a"
+    if not shiny and not mythic and petName then
+        local firstLetter = string.lower(string.sub(petName, 1, 1))
+        if firstLetter == "a" or firstLetter == "e" or firstLetter == "i" or firstLetter == "o" or firstLetter == "u" then
+            article = "an"
+        end
+    end
+    
+    -- Build description
+    local description = "**" .. playerName .. "** hatched " .. article .. " **" .. fullPetName .. "**!"
+    
+    -- Build fields (remove Egg, conditionally include Rarity/Probability)
+    local fields = {
+        {
+            name = "Hatched",
+            value = fullPetName,
+            inline = false
+        }
+    }
+    
+    -- Add probability or rarity field
+    if probabilityText then
+        table.insert(fields, {
+            name = "Rarity",
+            value = probabilityText,
+            inline = true
+        })
+    elseif rarity then
+        table.insert(fields, {
+            name = "Rarity",
+            value = rarity,
+            inline = true
+        })
+    end
+    
     -- Build embed (always use full format, no simplification)
     local embed = {
         title = "🎉 Congratulations!",
-        description = "**" .. playerName .. "** hatched **" .. fullPetName .. "**!",
+        description = description,
         color = embedColor,
-        fields = {
-            {
-                name = "Hatched",
-                value = fullPetName,
-                inline = false
-            },
-            {
-                name = "Rarity",
-                value = rarity,
-                inline = true
-            },
-            {
-                name = "Egg",
-                value = eggName or "Unknown",
-                inline = true
-            }
-        },
+        fields = fields,
         timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
     }
     
@@ -195,7 +259,7 @@ local function sendDiscordNotificationInternal(petName, shiny, mythic, eggName, 
         embeds = {embed}
     }
     
-    print("Sending webhook for " .. rarity .. " pet: " .. petName)
+    print("Sending webhook for " .. (probabilityText or rarity or "pet") .. " pet: " .. petName)
     
     local headers = {["Content-Type"] = "application/json"}
     local json = jsonEncode(payload)
@@ -234,6 +298,7 @@ local function processWebhookQueue()
             local mythic = webhookData.mythic
             local eggName = webhookData.eggName
             local rarity = webhookData.rarity
+            local pet = webhookData.pet
             
             print("Processing webhook for: " .. tostring(petName))
             
@@ -243,7 +308,7 @@ local function processWebhookQueue()
             local success = false
             
             while retryCount < maxRetries and not success do
-                success = sendDiscordNotificationInternal(petName, shiny, mythic, eggName, rarity)
+                success = sendDiscordNotificationInternal(petName, shiny, mythic, eggName, rarity, pet)
                 
                 if not success then
                     retryCount = retryCount + 1
@@ -266,7 +331,7 @@ local function processWebhookQueue()
 end
 
 -- Public function to queue webhook (handles rate limiting)
-local function sendDiscordNotification(petName, shiny, mythic, eggName, rarity)
+local function sendDiscordNotification(petName, shiny, mythic, eggName, rarity, pet)
     print("sendDiscordNotification called for: " .. tostring(petName))
     
     if webhookURL == "" then
@@ -285,7 +350,8 @@ local function sendDiscordNotification(petName, shiny, mythic, eggName, rarity)
         shiny = shiny,
         mythic = mythic,
         eggName = eggName,
-        rarity = rarity
+        rarity = rarity,
+        pet = pet
     })
     
     print("Added to queue. Queue size: " .. #webhookQueue)
@@ -339,7 +405,8 @@ local function connectToEvents()
                                     print("Calling sendDiscordNotification...")
                                     
                                     -- Send webhook only (no in-game notifications)
-                                    sendDiscordNotification(petName, shiny, mythic, eggName, rarity)
+                                    -- Pass the pet object so we can calculate probability
+                                    sendDiscordNotification(petName, shiny, mythic, eggName, rarity, pet)
                                 else
                                     print("Pet is " .. rarity .. " (not Legendary/Secret, skipping)")
                                 end
@@ -383,20 +450,33 @@ f.Parent = g
 
 -- Title bar
 local title = Instance.new("TextLabel")
-title.Size = UDim2.new(1, -50, 0, 40)
+title.Size = UDim2.new(1, -90, 0, 40)
+title.Position = UDim2.new(0, 50, 0, 0)
 title.BackgroundColor3 = Color3.fromRGB(50, 150, 50)
-title.Text = "Auto Hatch & Notifier v2"
+title.Text = "Auto Hatch & Notifier"
 title.TextColor3 = Color3.fromRGB(255, 255, 255)
 title.TextSize = 16
 title.Font = Enum.Font.GothamBold
 title.BorderSizePixel = 0
 title.Parent = f
 
--- Close button (red X)
+-- Close button (top left - opens confirmation dialog)
+local closeBtn = Instance.new("TextButton")
+closeBtn.Size = UDim2.new(0, 50, 0, 40)
+closeBtn.Position = UDim2.new(0, 0, 0, 0)
+closeBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+closeBtn.Text = "Close"
+closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeBtn.TextSize = 12
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.BorderSizePixel = 0
+closeBtn.Parent = f
+
+-- Hide button (top right - hides GUI)
 local closeXBtn = Instance.new("TextButton")
 closeXBtn.Size = UDim2.new(0, 40, 0, 40)
 closeXBtn.Position = UDim2.new(1, -40, 0, 0)
-closeXBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+closeXBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
 closeXBtn.Text = "X"
 closeXBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 closeXBtn.TextSize = 24
@@ -453,7 +533,7 @@ yesBtn.Parent = confirmFrame
 local noBtn = Instance.new("TextButton")
 noBtn.Size = UDim2.new(0, 120, 0, 35)
 noBtn.Position = UDim2.new(1, -140, 1, -50)
-noBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+noBtn.BackgroundColor3 = Color3.fromRGB(80, 140, 80)
 noBtn.Text = "No, Cancel"
 noBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 noBtn.TextSize = 12
@@ -576,9 +656,18 @@ userIDInput.FocusLost:Connect(function(enterPressed)
     print("Discord User ID saved: " .. (id ~= "" and id or "EMPTY"))
 end)
 
--- Close X button - opens confirmation dialog
-closeXBtn.Activated:Connect(function()
+-- Close button (top left) - opens confirmation dialog
+closeBtn.Activated:Connect(function()
     confirmFrame.Visible = true
+end)
+
+-- Hide button (top right X) - hides GUI
+closeXBtn.Activated:Connect(function()
+    f.Visible = false
+    if toggleBtn then
+        toggleBtn.Text = ">>>"
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+    end
 end)
 
 -- Yes button - closes everything
