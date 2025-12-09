@@ -143,99 +143,180 @@ local function getPetImage(pet, shiny, mythic)
     return petData.Images[imageType] or petData.Images.Normal
 end
 
--- Send Discord webhook
+-- Send Discord webhook with beautiful embed
 local function sendDiscordNotification(petName, shiny, mythic, eggName, rarity)
     if not httpLib or webhookURL == "" then 
         print("✗ Cannot send: httpLib=" .. tostring(httpLib) .. ", webhookURL=" .. tostring(webhookURL))
         return 
     end
     
-    -- Build pet prefix
-    local prefix = ""
-    if shiny and mythic then
-        prefix = "Shiny Mythic "
-    elseif shiny then
-        prefix = "Shiny "
-    elseif mythic then
-        prefix = "Mythic "
-    end
+    -- Get player name
+    local playerName = p.Name or "Unknown Player"
     
-    -- Build message
-    local mention = discordUserID ~= "" and ("<@" .. discordUserID .. "> ") or ""
-    local message = mention .. "Congratulations! You hatched a " .. prefix .. petName .. "!"
+    -- Build pet name with prefix
+    local fullPetName = petName
+    if shiny and mythic then
+        fullPetName = "Shiny Mythic " .. petName
+    elseif shiny then
+        fullPetName = "Shiny " .. petName
+    elseif mythic then
+        fullPetName = "Mythic " .. petName
+    end
     
     -- Get pet image
     local petImage = getPetImage(petName, shiny, mythic)
     
-    -- Build embed
-    local embed = {
-        title = "🎉 " .. rarity .. " Pet Hatched!",
-        description = message,
-        color = rarity == "Secret" and 16711680 or 16755200, -- Red for secret, orange for legendary
-        fields = {
-            {
-                name = "Pet",
-                value = prefix .. petName,
-                inline = true
-            },
-            {
-                name = "Egg",
-                value = eggName or "Unknown",
-                inline = true
-            },
-            {
-                name = "Rarity",
-                value = rarity,
-                inline = true
-            }
-        },
-        timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
-    }
-    
-    if petImage then
-        embed.thumbnail = {
-            url = petImage
-        }
+    -- Determine color based on pet type
+    local embedColor = 3447003 -- Default blue
+    if shiny and mythic then
+        embedColor = 16711680 -- Bright red for Shiny Mythic
+    elseif shiny then
+        embedColor = 16766720 -- Gold/yellow-orange for Shiny
+    elseif mythic then
+        embedColor = 10181046 -- Purple-pink for Mythic
+    elseif rarity == "Secret" then
+        embedColor = 16711680 -- Red for Secret
+    elseif rarity == "Legendary" then
+        embedColor = 16755200 -- Orange for Legendary
     end
     
-    local payload = {
-        content = message,
-        embeds = {embed}
-    }
+    -- Build mention
+    local mention = discordUserID ~= "" and ("<@" .. discordUserID .. "> ") or ""
     
-    local json = jsonEncode(payload)
-    local headers = {["Content-Type"] = "application/json"}
+    -- Try progressively simpler payloads
+    local attempts = {
+        -- Attempt 1: Full embed with all features
+        function()
+            local embed = {
+                title = "🎉 Congratulations!",
+                description = mention .. "**" .. playerName .. "** hatched **" .. fullPetName .. "**!",
+                color = embedColor,
+                fields = {
+                    {
+                        name = "Hatched",
+                        value = fullPetName,
+                        inline = false
+                    },
+                    {
+                        name = "Rarity",
+                        value = rarity,
+                        inline = true
+                    },
+                    {
+                        name = "Egg",
+                        value = eggName or "Unknown",
+                        inline = true
+                    }
+                },
+                timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+            }
+            
+            if petImage then
+                embed.thumbnail = {
+                    url = petImage
+                }
+            end
+            
+            return {
+                content = mention,
+                embeds = {embed}
+            }
+        end,
+        
+        -- Attempt 2: Embed without thumbnail
+        function()
+            local embed = {
+                title = "🎉 Congratulations!",
+                description = mention .. "**" .. playerName .. "** hatched **" .. fullPetName .. "**!",
+                color = embedColor,
+                fields = {
+                    {
+                        name = "Hatched",
+                        value = fullPetName,
+                        inline = false
+                    },
+                    {
+                        name = "Rarity",
+                        value = rarity,
+                        inline = true
+                    }
+                },
+                timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+            }
+            
+            return {
+                content = mention,
+                embeds = {embed}
+            }
+        end,
+        
+        -- Attempt 3: Embed without fields
+        function()
+            local embed = {
+                title = "🎉 Congratulations!",
+                description = mention .. "**" .. playerName .. "** hatched **" .. fullPetName .. "**!\n**Rarity:** " .. rarity,
+                color = embedColor,
+                timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+            }
+            
+            if petImage then
+                embed.thumbnail = {
+                    url = petImage
+                }
+            end
+            
+            return {
+                content = mention,
+                embeds = {embed}
+            }
+        end,
+        
+        -- Attempt 4: Simple embed
+        function()
+            return {
+                content = mention .. "🎉 **Congratulations!** " .. playerName .. " hatched **" .. fullPetName .. "**! (" .. rarity .. ")",
+                embeds = {}
+            }
+        end,
+        
+        -- Attempt 5: Plain message
+        function()
+            return {
+                content = mention .. "🎉 Congratulations! " .. playerName .. " hatched " .. fullPetName .. "! (" .. rarity .. ")"
+            }
+        end
+    }
     
     print("Sending webhook for " .. rarity .. " pet: " .. petName)
     
-    -- Try sending with embed first
-    local json = jsonEncode(payload)
     local headers = {["Content-Type"] = "application/json"}
+    local success = false
+    local status = 0
+    local response = ""
     
-    local success, response, status = httpLib(webhookURL, "POST", headers, json)
-    
-    -- If embed fails, try simple message
-    if not success or (status ~= 200 and status ~= 204) then
-        print("Embed failed, trying simple message...")
-        print("  Status: " .. tostring(status))
-        print("  Response: " .. tostring(response))
+    -- Try each attempt in order
+    for i, attemptFunc in ipairs(attempts) do
+        local payload = attemptFunc()
+        local json = jsonEncode(payload)
         
-        -- Fallback to simple message
-        local simplePayload = {
-            content = message
-        }
-        local simpleJson = jsonEncode(simplePayload)
-        success, response, status = httpLib(webhookURL, "POST", headers, simpleJson)
+        print("Attempt " .. i .. ": " .. (#json < 200 and json or string.sub(json, 1, 200) .. "..."))
+        
+        success, response, status = httpLib(webhookURL, "POST", headers, json)
+        
+        if success and (status == 200 or status == 204) then
+            print("✓ Discord notification sent! (Attempt " .. i .. ", Status: " .. tostring(status) .. ")")
+            return
+        else
+            print("✗ Attempt " .. i .. " failed: Status " .. tostring(status))
+            if i < #attempts then
+                print("  Trying simpler format...")
+            end
+        end
     end
     
-    if success and (status == 200 or status == 204) then
-        print("✓ Discord notification sent! Status: " .. tostring(status))
-    else
-        print("✗ Discord notification failed!")
-        print("  Success: " .. tostring(success))
-        print("  Status: " .. tostring(status))
-        print("  Response: " .. tostring(response))
-    end
+    print("✗ All attempts failed!")
+    print("  Final Status: " .. tostring(status))
+    print("  Response: " .. tostring(response))
 end
 
 -- Send in-game notification
