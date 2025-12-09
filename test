@@ -1,5 +1,5 @@
 -- BUBBLEGUM SIMULATOR - AUTO HATCH & SECRET NOTIFIER
--- Final version with auto hatch and Discord notifications
+-- Version 2.0 with auto hatch and Discord notifications
 
 local P = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -128,34 +128,98 @@ local function jsonEncode(t)
     return encodeValue(t, 0)
 end
 
--- Get pet image
-local function getPetImage(pet, shiny, mythic)
-    if not PetsData or not pet then return nil end
-    
-    local petData = PetsData[pet]
-    if not petData or not petData.Images then return nil end
-    
-    local imageType = "Normal"
-    if shiny and mythic then
-        imageType = "MythicShiny"
-    elseif shiny then
-        imageType = "Shiny"
-    elseif mythic then
-        imageType = "Mythic"
+-- Function to send webhook (with 429 retry logic) - MUST be defined first
+local function sendDiscordNotificationInternal(petName, shiny, mythic, eggName, rarity)
+    if not httpLib or webhookURL == "" then 
+        print("✗ Cannot send: httpLib=" .. tostring(httpLib) .. ", webhookURL=" .. tostring(webhookURL))
+        return true -- Return true to not retry if webhook not configured
     end
     
-    return petData.Images[imageType] or petData.Images.Normal
+    -- Get player name
+    local playerName = p.Name or "Unknown Player"
+    
+    -- Build pet name with prefix
+    local fullPetName = petName
+    if shiny == true and mythic == true then
+        fullPetName = "Shiny Mythic " .. petName
+    elseif shiny == true then
+        fullPetName = "Shiny " .. petName
+    elseif mythic == true then
+        fullPetName = "Mythic " .. petName
+    end
+    
+    -- Determine color based on pet type
+    local embedColor = 9807270 -- Grey for normal pets (default)
+    if shiny == true and mythic == true then
+        embedColor = 16711680 -- Bright red for Shiny Mythic
+    elseif shiny == true then
+        embedColor = 16766720 -- Gold/yellow-orange for Shiny
+    elseif mythic == true then
+        embedColor = 10181046 -- Purple-pink for Mythic
+    else
+        -- Not shiny or mythic - always grey regardless of rarity
+        embedColor = 9807270 -- Grey
+    end
+    
+    -- Build mention (for Discord ping)
+    local mention = discordUserID ~= "" and ("<@" .. discordUserID .. ">") or ""
+    
+    -- Build embed (always use full format, no simplification)
+    local embed = {
+        title = "🎉 Congratulations!",
+        description = "**" .. playerName .. "** hatched **" .. fullPetName .. "**!",
+        color = embedColor,
+        fields = {
+            {
+                name = "Hatched",
+                value = fullPetName,
+                inline = false
+            },
+            {
+                name = "Rarity",
+                value = rarity,
+                inline = true
+            },
+            {
+                name = "Egg",
+                value = eggName or "Unknown",
+                inline = true
+            }
+        },
+        timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+    }
+    
+    -- Put mention in content field (required for Discord to actually ping)
+    local payload = {
+        content = mention ~= "" and mention or nil,
+        embeds = {embed}
+    }
+    
+    print("Sending webhook for " .. rarity .. " pet: " .. petName)
+    
+    local headers = {["Content-Type"] = "application/json"}
+    local json = jsonEncode(payload)
+    local success, response, status = httpLib(webhookURL, "POST", headers, json)
+    
+    if success and (status == 200 or status == 204) then
+        print("✓ Discord notification sent! Status: " .. tostring(status))
+        return true
+    elseif status == 429 then
+        -- Rate limited - return false to trigger retry
+        print("✗ Rate limited (429), will retry...")
+        return false
+    else
+        print("✗ Webhook failed!")
+        print("  Status: " .. tostring(status))
+        print("  Response: " .. tostring(response))
+        -- For non-429 errors, return true to not retry (400 is likely permanent issue)
+        return true
+    end
 end
 
 -- Process webhook queue
 local function processWebhookQueue()
-    if isSendingWebhook then
-        print("Already processing queue, skipping...")
-        return
-    end
-    
-    if #webhookQueue == 0 then
-        print("Queue is empty, nothing to process")
+    if isSendingWebhook or #webhookQueue == 0 then
         return
     end
     
@@ -201,109 +265,9 @@ local function processWebhookQueue()
     end)
 end
 
--- Internal function to send webhook (returns true if successful, false if rate limited)
-local function sendDiscordNotificationInternal(petName, shiny, mythic, eggName, rarity)
-    if not httpLib or webhookURL == "" then 
-        print("✗ Cannot send: httpLib=" .. tostring(httpLib) .. ", webhookURL=" .. tostring(webhookURL))
-        return true -- Return true to not retry if webhook not configured
-    end
-    
-    -- Get player name
-    local playerName = p.Name or "Unknown Player"
-    
-    -- Build pet name with prefix
-    local fullPetName = petName
-    if shiny and mythic then
-        fullPetName = "Shiny Mythic " .. petName
-    elseif shiny then
-        fullPetName = "Shiny " .. petName
-    elseif mythic then
-        fullPetName = "Mythic " .. petName
-    end
-    
-    -- Get pet image
-    local petImage = getPetImage(petName, shiny, mythic)
-    
-    -- Determine color based on pet type (check shiny/mythic first, then rarity)
-    local embedColor = 9807270 -- Grey for normal pets (default)
-    
-    -- Priority: Shiny Mythic > Shiny > Mythic > Rarity
-    if shiny == true and mythic == true then
-        embedColor = 16711680 -- Bright red for Shiny Mythic
-    elseif shiny == true then
-        embedColor = 16766720 -- Gold/yellow-orange for Shiny
-    elseif mythic == true then
-        embedColor = 10181046 -- Purple-pink for Mythic
-    else
-        -- Not shiny or mythic - always grey regardless of rarity
-        embedColor = 9807270 -- Grey
-    end
-    
-    -- Build mention (for Discord ping)
-    local mention = discordUserID ~= "" and ("<@" .. discordUserID .. ">") or ""
-    
-    -- Build embed (always use full format, no simplification)
-    local embed = {
-        title = "🎉 Congratulations!",
-        description = "**" .. playerName .. "** hatched **" .. fullPetName .. "**!",
-        color = embedColor,
-        fields = {
-            {
-                name = "Hatched",
-                value = fullPetName,
-                inline = false
-            },
-            {
-                name = "Rarity",
-                value = rarity,
-                inline = true
-            },
-            {
-                name = "Egg",
-                value = eggName or "Unknown",
-                inline = true
-            }
-        },
-        timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
-    }
-    
-    -- Don't add thumbnail - Discord doesn't accept Roblox asset URLs directly
-    -- Images would need to be hosted externally or converted to a format Discord accepts
-    -- For now, we'll skip thumbnails to avoid 400 errors
-    
-    -- Put mention in content field (required for Discord to actually ping)
-    local payload = {
-        content = mention ~= "" and mention or nil,
-        embeds = {embed}
-    }
-    
-    print("Sending webhook for " .. rarity .. " pet: " .. petName)
-    
-    local headers = {["Content-Type"] = "application/json"}
-    local json = jsonEncode(payload)
-    local success, response, status = httpLib(webhookURL, "POST", headers, json)
-    
-    if success and (status == 200 or status == 204) then
-        print("✓ Discord notification sent! Status: " .. tostring(status))
-        return true
-    elseif status == 429 then
-        -- Rate limited - return false to trigger retry
-        print("✗ Rate limited (429), will retry...")
-        return false
-    else
-        print("✗ Webhook failed!")
-        print("  Status: " .. tostring(status))
-        print("  Response: " .. tostring(response))
-        -- For non-429 errors, return true to not retry (400 is likely permanent issue)
-        return true
-    end
-end
-
 -- Public function to queue webhook (handles rate limiting)
 local function sendDiscordNotification(petName, shiny, mythic, eggName, rarity)
     print("sendDiscordNotification called for: " .. tostring(petName))
-    print("  webhookURL: " .. (webhookURL ~= "" and "SET" or "EMPTY"))
-    print("  httpLib: " .. tostring(httpLib))
     
     if webhookURL == "" then
         print("✗ Webhook URL not set! Cannot send notification.")
@@ -330,66 +294,15 @@ local function sendDiscordNotification(petName, shiny, mythic, eggName, rarity)
     processWebhookQueue()
 end
 
--- Track recent notifications to prevent duplicates
-local recentNotifications = {}
-local notificationCooldown = 2 -- seconds
-
--- Send in-game notification (with deduplication)
-local function sendInGameNotification(petName, shiny, mythic, rarity)
-    -- Create unique key for this pet
-    local key = petName .. "_" .. tostring(shiny) .. "_" .. tostring(mythic) .. "_" .. rarity
-    local currentTime = tick()
-    
-    -- Check if we've sent this notification recently
-    if recentNotifications[key] and (currentTime - recentNotifications[key]) < notificationCooldown then
-        print("Skipping duplicate notification for: " .. key)
-        return
-    end
-    
-    -- Mark as sent
-    recentNotifications[key] = currentTime
-    
-    -- Clean old entries (older than cooldown)
-    for k, v in pairs(recentNotifications) do
-        if currentTime - v > notificationCooldown then
-            recentNotifications[k] = nil
-        end
-    end
-    
-    local prefix = ""
-    if shiny and mythic then
-        prefix = "Shiny Mythic "
-    elseif shiny then
-        prefix = "Shiny "
-    elseif mythic then
-        prefix = "Mythic "
-    end
-    
-    game:GetService("StarterGui"):SetCore("SendNotification", {
-        Title = "🎉 " .. rarity .. " Pet Hatched!",
-        Text = prefix .. petName,
-        Duration = 5,
-        Button1 = "OK"
-    })
-end
-
 -- Connect to HatchEgg event
 local function connectToEvents()
     if not Remote then
         print("✗ Remote module not loaded!")
-        if statusLabel then
-            statusLabel.Text = "Status: ERROR - Remote module not loaded!"
-            statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
-        end
         return false
     end
     
     if not ItemUtil then
         print("✗ ItemUtil not loaded!")
-        if statusLabel then
-            statusLabel.Text = "Status: ERROR - ItemUtil not loaded!"
-            statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
-        end
         return false
     end
     
@@ -614,10 +527,6 @@ userIDInput.Font = Enum.Font.Gotham
 userIDInput.BorderSizePixel = 0
 userIDInput.Parent = f
 
--- Status label (hidden, used for internal status tracking)
-local statusLabel = nil
-
-
 -- Toggle GUI button (top right, moved up)
 local toggleBtn = Instance.new("TextButton")
 toggleBtn.Size = UDim2.new(0, 50, 0, 50)
@@ -664,6 +573,7 @@ end)
 userIDInput.FocusLost:Connect(function(enterPressed)
     local id = userIDInput.Text:gsub("^%s*(.-)%s*$", "%1")
     discordUserID = id
+    print("Discord User ID saved: " .. (id ~= "" and id or "EMPTY"))
 end)
 
 -- Close X button - opens confirmation dialog
@@ -703,4 +613,3 @@ end)
 
 print("✓ GUI created")
 print("Ready! Click 'Auto Hatch' to start hatching")
-
