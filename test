@@ -25,6 +25,57 @@ local autoHatchEnabled = false
 local webhookURL = ""
 local discordUserID = ""
 
+-- Settings file path
+local SETTINGS_FILE = "bubblegum_settings.json"
+
+-- Load settings from file (non-blocking, won't break if it fails)
+local function loadSettings()
+    if not readfile or not isfile or not HttpService then
+        return -- File system not available, use defaults
+    end
+    
+    local success, result = pcall(function()
+        if isfile(SETTINGS_FILE) then
+            local content = readfile(SETTINGS_FILE)
+            if content and content ~= "" then
+                local decoded = HttpService:JSONDecode(content)
+                if decoded and type(decoded) == "table" then
+                    if decoded.webhookURL and type(decoded.webhookURL) == "string" then
+                        webhookURL = decoded.webhookURL
+                    end
+                    if decoded.discordUserID and type(decoded.discordUserID) == "string" then
+                        discordUserID = decoded.discordUserID
+                    end
+                    print("✓ Settings loaded from file")
+                    return true
+                end
+            end
+        end
+        return false
+    end)
+    
+    if not success then
+        -- Silently fail, use defaults
+    end
+end
+
+-- Save settings to file (non-blocking, won't break if it fails)
+local function saveSettings()
+    if not writefile or not HttpService then
+        return -- File system not available, skip saving
+    end
+    
+    pcall(function()
+        local settings = {
+            webhookURL = webhookURL or "",
+            discordUserID = discordUserID or ""
+        }
+        local json = HttpService:JSONEncode(settings)
+        writefile(SETTINGS_FILE, json)
+        print("✓ Settings saved")
+    end)
+end
+
 -- Webhook queue for rate limiting
 local webhookQueue = {}
 local isSendingWebhook = false
@@ -97,6 +148,9 @@ local function loadModules()
 end
 
 loadModules()
+
+-- Load saved settings (before GUI creation, non-blocking)
+loadSettings()
 
 -- HTTP for Delta Mobile (using the working method from testing)
 local httpLib = nil
@@ -698,7 +752,7 @@ webhookInput.Size = UDim2.new(0, 320, 0, 30)
 webhookInput.Position = UDim2.new(0, 15, 0, 130)
 webhookInput.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 webhookInput.TextColor3 = Color3.fromRGB(255, 255, 255)
-webhookInput.Text = ""
+webhookInput.Text = webhookURL or "" -- Pre-fill with loaded value if available
 webhookInput.PlaceholderText = "https://discord.com/api/webhooks/..."
 webhookInput.PlaceholderColor3 = Color3.fromRGB(150, 150, 150)
 webhookInput.TextSize = 10
@@ -725,7 +779,7 @@ userIDInput.Size = UDim2.new(0, 320, 0, 30)
 userIDInput.Position = UDim2.new(0, 15, 0, 190)
 userIDInput.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 userIDInput.TextColor3 = Color3.fromRGB(255, 255, 255)
-userIDInput.Text = ""
+userIDInput.Text = discordUserID or "" -- Pre-fill with loaded value if available
 userIDInput.PlaceholderText = "123456789012345678"
 userIDInput.PlaceholderColor3 = Color3.fromRGB(150, 150, 150)
 userIDInput.TextSize = 11
@@ -778,6 +832,7 @@ webhookInput.FocusLost:Connect(function(enterPressed)
     local url = webhookInput.Text:gsub("^%s*(.-)%s*$", "%1")
     webhookURL = url
     print("Webhook URL saved: " .. (url ~= "" and "SET (" .. string.sub(url, 1, 50) .. "...)" or "EMPTY"))
+    saveSettings() -- Save to file (non-blocking, won't break if it fails)
 end)
 
 -- Discord User ID input handler
@@ -785,6 +840,7 @@ userIDInput.FocusLost:Connect(function(enterPressed)
     local id = userIDInput.Text:gsub("^%s*(.-)%s*$", "%1")
     discordUserID = id
     print("Discord User ID saved: " .. (id ~= "" and id or "EMPTY"))
+    saveSettings() -- Save to file (non-blocking, won't break if it fails)
 end)
 
 -- Close button (top left) - opens confirmation dialog
