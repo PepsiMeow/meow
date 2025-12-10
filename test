@@ -98,43 +98,6 @@ end
 
 loadModules()
 
--- Function to get Discord-compatible thumbnail URL from Roblox asset ID
-local function getThumbnailUrl(assetId)
-    if not assetId then
-        return nil
-    end
-    
-    local url = "https://thumbnails.roproxy.com/v1/assets?assetIds=" .. assetId .. "&size=420x420&format=Png&isCircular=false"
-    
-    local success, response = pcall(function()
-        if HttpService and HttpService.GetAsync then
-            return HttpService:GetAsync(url)
-        elseif httpLib then
-            -- Fallback to httpLib for GET requests
-            local ok, body, status = httpLib(url, "GET", {}, "")
-            if ok and status == 200 then
-                return body
-            end
-        end
-        return nil
-    end)
-    
-    if success and response then
-        local success2, decoded = pcall(function()
-            if HttpService and HttpService.JSONDecode then
-                return HttpService:JSONDecode(response)
-            end
-            return nil
-        end)
-        
-        if success2 and decoded and decoded.data and decoded.data[1] and decoded.data[1].imageUrl then
-            return decoded.data[1].imageUrl
-        end
-    end
-    
-    return nil
-end
-
 -- HTTP for Delta Mobile (using the working method from testing)
 local httpLib = nil
 local httpLibName = nil
@@ -152,6 +115,94 @@ if request then
         return false, err or "Request exception", 0
     end
     httpLibName = "request"
+end
+
+-- Function to get Discord-compatible thumbnail URL from Roblox asset ID
+local function getThumbnailUrl(assetId)
+    if not assetId then
+        return nil
+    end
+    
+    local url = "https://thumbnails.roproxy.com/v1/assets?assetIds=" .. assetId .. "&size=420x420&format=Png&isCircular=false"
+    
+    print("  Fetching thumbnail URL from: " .. url)
+    
+    local success, response, errorMsg = pcall(function()
+        -- Try httpLib first (we know this works for webhooks)
+        if httpLib then
+            print("  Using httpLib to fetch thumbnail...")
+            local ok, body, status = httpLib(url, "GET", {}, "")
+            if ok and status == 200 then
+                print("  httpLib success! Status: " .. tostring(status))
+                return body, nil
+            else
+                print("  httpLib failed! Status: " .. tostring(status) .. ", Body: " .. tostring(body))
+                return nil, "httpLib returned status " .. tostring(status)
+            end
+        elseif HttpService and HttpService.GetAsync then
+            print("  Using HttpService:GetAsync to fetch thumbnail...")
+            return HttpService:GetAsync(url), nil
+        else
+            return nil, "No HTTP method available"
+        end
+    end)
+    
+    if not success then
+        print("  Error in pcall: " .. tostring(response))
+        return nil
+    end
+    
+    if not response then
+        print("  No response received. Error: " .. tostring(errorMsg))
+        return nil
+    end
+    
+    print("  Response received, length: " .. tostring(#response))
+    
+    -- Try to decode JSON
+    local success2, decoded = pcall(function()
+        if HttpService and HttpService.JSONDecode then
+            return HttpService:JSONDecode(response)
+        else
+            -- Manual JSON parsing fallback (basic)
+            return nil
+        end
+    end)
+    
+    if not success2 then
+        print("  JSON decode failed: " .. tostring(decoded))
+        print("  Response preview: " .. string.sub(response, 1, 200))
+        return nil
+    end
+    
+    if decoded and decoded.data and decoded.data[1] then
+        if decoded.data[1].imageUrl then
+            print("  ✓ Found imageUrl: " .. decoded.data[1].imageUrl)
+            return decoded.data[1].imageUrl
+        else
+            print("  Response structure: data[1] exists but no imageUrl")
+            print("  data[1] keys: " .. table.concat((function()
+                local keys = {}
+                for k in pairs(decoded.data[1]) do
+                    table.insert(keys, tostring(k))
+                end
+                return keys
+            end)(), ", "))
+        end
+    else
+        print("  Unexpected response structure")
+        if decoded then
+            print("  Response keys: " .. table.concat((function()
+                local keys = {}
+                for k in pairs(decoded) do
+                    table.insert(keys, tostring(k))
+                end
+                return keys
+            end)(), ", "))
+        end
+    end
+    
+    return nil
 end
 
 -- JSON encoder (properly handles nested structures)
