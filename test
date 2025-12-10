@@ -25,6 +25,100 @@ local autoHatchEnabled = false
 local webhookURL = ""
 local discordUserID = ""
 
+-- Settings file path
+local SETTINGS_FILE = "bubblegum_settings.json"
+
+-- Save settings to file
+local function saveSettings()
+    local settings = {
+        webhookURL = webhookURL,
+        discordUserID = discordUserID
+    }
+    
+    local success = false
+    
+    -- Try writefile first (common in executors)
+    if writefile then
+        local success1, err = pcall(function()
+            local json = HttpService:JSONEncode(settings)
+            writefile(SETTINGS_FILE, json)
+            return true
+        end)
+        if success1 then
+            success = true
+            print("✓ Settings saved to file")
+        end
+    end
+    
+    -- Fallback to getgenv/setgenv if available
+    if not success and getgenv and setgenv then
+        local success2 = pcall(function()
+            setgenv("BubblegumWebhookURL", webhookURL)
+            setgenv("BubblegumDiscordUserID", discordUserID)
+            return true
+        end)
+        if success2 then
+            success = true
+            print("✓ Settings saved to global environment")
+        end
+    end
+    
+    if not success then
+        print("⚠ Could not save settings (no file system available)")
+    end
+end
+
+-- Load settings from file
+local function loadSettings()
+    local loaded = false
+    
+    -- Try readfile first (common in executors)
+    if readfile then
+        local success1, data = pcall(function()
+            if isfile and isfile(SETTINGS_FILE) then
+                local content = readfile(SETTINGS_FILE)
+                if content then
+                    local decoded = HttpService:JSONDecode(content)
+                    if decoded then
+                        webhookURL = decoded.webhookURL or ""
+                        discordUserID = decoded.discordUserID or ""
+                        loaded = true
+                        print("✓ Settings loaded from file")
+                        return true
+                    end
+                end
+            end
+            return false
+        end)
+        if success1 and loaded then
+            return
+        end
+    end
+    
+    -- Fallback to getgenv if available
+    if getgenv then
+        local success2 = pcall(function()
+            local savedURL = getgenv("BubblegumWebhookURL")
+            local savedID = getgenv("BubblegumDiscordUserID")
+            if savedURL then
+                webhookURL = savedURL
+                loaded = true
+            end
+            if savedID then
+                discordUserID = savedID
+                loaded = true
+            end
+            if loaded then
+                print("✓ Settings loaded from global environment")
+            end
+        end)
+    end
+    
+    if not loaded then
+        print("ℹ No saved settings found (using defaults)")
+    end
+end
+
 -- Webhook queue for rate limiting
 local webhookQueue = {}
 local isSendingWebhook = false
@@ -97,6 +191,9 @@ local function loadModules()
 end
 
 loadModules()
+
+-- Load saved settings
+loadSettings()
 
 -- HTTP for Delta Mobile (using the working method from testing)
 local httpLib = nil
@@ -698,7 +795,7 @@ webhookInput.Size = UDim2.new(0, 320, 0, 30)
 webhookInput.Position = UDim2.new(0, 15, 0, 130)
 webhookInput.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 webhookInput.TextColor3 = Color3.fromRGB(255, 255, 255)
-webhookInput.Text = ""
+webhookInput.Text = webhookURL -- Set from loaded settings
 webhookInput.PlaceholderText = "https://discord.com/api/webhooks/..."
 webhookInput.PlaceholderColor3 = Color3.fromRGB(150, 150, 150)
 webhookInput.TextSize = 10
@@ -725,7 +822,7 @@ userIDInput.Size = UDim2.new(0, 320, 0, 30)
 userIDInput.Position = UDim2.new(0, 15, 0, 190)
 userIDInput.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 userIDInput.TextColor3 = Color3.fromRGB(255, 255, 255)
-userIDInput.Text = ""
+userIDInput.Text = discordUserID -- Set from loaded settings
 userIDInput.PlaceholderText = "123456789012345678"
 userIDInput.PlaceholderColor3 = Color3.fromRGB(150, 150, 150)
 userIDInput.TextSize = 11
@@ -778,6 +875,7 @@ webhookInput.FocusLost:Connect(function(enterPressed)
     local url = webhookInput.Text:gsub("^%s*(.-)%s*$", "%1")
     webhookURL = url
     print("Webhook URL saved: " .. (url ~= "" and "SET (" .. string.sub(url, 1, 50) .. "...)" or "EMPTY"))
+    saveSettings() -- Save to file
 end)
 
 -- Discord User ID input handler
@@ -785,6 +883,7 @@ userIDInput.FocusLost:Connect(function(enterPressed)
     local id = userIDInput.Text:gsub("^%s*(.-)%s*$", "%1")
     discordUserID = id
     print("Discord User ID saved: " .. (id ~= "" and id or "EMPTY"))
+    saveSettings() -- Save to file
 end)
 
 -- Close button (top left) - opens confirmation dialog
