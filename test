@@ -125,22 +125,16 @@ local function getThumbnailUrl(assetId)
     
     local url = "https://thumbnails.roproxy.com/v1/assets?assetIds=" .. assetId .. "&size=420x420&format=Png&isCircular=false"
     
-    print("  Fetching thumbnail URL from: " .. url)
-    
     local success, response, errorMsg = pcall(function()
         -- Try httpLib first (we know this works for webhooks)
         if httpLib then
-            print("  Using httpLib to fetch thumbnail...")
             local ok, body, status = httpLib(url, "GET", {}, "")
             if ok and status == 200 then
-                print("  httpLib success! Status: " .. tostring(status))
                 return body, nil
             else
-                print("  httpLib failed! Status: " .. tostring(status) .. ", Body: " .. tostring(body))
                 return nil, "httpLib returned status " .. tostring(status)
             end
         elseif HttpService and HttpService.GetAsync then
-            print("  Using HttpService:GetAsync to fetch thumbnail...")
             return HttpService:GetAsync(url), nil
         else
             return nil, "No HTTP method available"
@@ -148,58 +142,27 @@ local function getThumbnailUrl(assetId)
     end)
     
     if not success then
-        print("  Error in pcall: " .. tostring(response))
         return nil
     end
     
     if not response then
-        print("  No response received. Error: " .. tostring(errorMsg))
         return nil
     end
-    
-    print("  Response received, length: " .. tostring(#response))
     
     -- Try to decode JSON
     local success2, decoded = pcall(function()
         if HttpService and HttpService.JSONDecode then
             return HttpService:JSONDecode(response)
-        else
-            -- Manual JSON parsing fallback (basic)
-            return nil
         end
+        return nil
     end)
     
     if not success2 then
-        print("  JSON decode failed: " .. tostring(decoded))
-        print("  Response preview: " .. string.sub(response, 1, 200))
         return nil
     end
     
-    if decoded and decoded.data and decoded.data[1] then
-        if decoded.data[1].imageUrl then
-            print("  ✓ Found imageUrl: " .. decoded.data[1].imageUrl)
-            return decoded.data[1].imageUrl
-        else
-            print("  Response structure: data[1] exists but no imageUrl")
-            print("  data[1] keys: " .. table.concat((function()
-                local keys = {}
-                for k in pairs(decoded.data[1]) do
-                    table.insert(keys, tostring(k))
-                end
-                return keys
-            end)(), ", "))
-        end
-    else
-        print("  Unexpected response structure")
-        if decoded then
-            print("  Response keys: " .. table.concat((function()
-                local keys = {}
-                for k in pairs(decoded) do
-                    table.insert(keys, tostring(k))
-                end
-                return keys
-            end)(), ", "))
-        end
+    if decoded and decoded.data and decoded.data[1] and decoded.data[1].imageUrl then
+        return decoded.data[1].imageUrl
     end
     
     return nil
@@ -374,7 +337,7 @@ local function sendDiscordNotificationInternal(petName, shiny, mythic, eggName, 
         embeds = {embed}
     }
     
-    print("Sending webhook for " .. (probabilityText or rarity or "pet") .. " pet: " .. petName .. (petImageUrl and " (with thumbnail)" or " (no thumbnail)"))
+    print("Sending webhook for " .. (probabilityText or rarity or "pet") .. " pet: " .. petName)
     
     local headers = {["Content-Type"] = "application/json"}
     local json = jsonEncode(payload)
@@ -472,101 +435,32 @@ local function sendDiscordNotification(petName, shiny, mythic, eggName, rarity, 
             return PetsData[petName]
         end)
         
-        if not success then
-            print("⚠ Error accessing PetsData for " .. petName .. ": " .. tostring(petData))
-        elseif not petData then
-            -- Try to find the pet with different case or check if it exists
-            print("⚠ Pet data not found for: " .. petName)
-            print("  PetsData type: " .. type(PetsData))
-            if type(PetsData) == "table" then
-                -- Try to find a matching pet name (case-insensitive)
-                local foundPet = nil
-                local foundKey = nil
-                for key, value in pairs(PetsData) do
-                    if type(key) == "string" and string.lower(key) == string.lower(petName) then
-                        foundPet = value
-                        foundKey = key
-                        break
-                    end
-                end
-                if foundPet then
-                    print("  Found pet with different case: " .. foundKey)
-                    petData = foundPet
-                else
-                    -- Debug: print first few pet names to see structure
-                    local count = 0
-                    for key, value in pairs(PetsData) do
-                        if type(key) == "string" then
-                            print("  Sample pet name: " .. key)
-                            count = count + 1
-                            if count >= 3 then break end
-                        end
+        if success and petData and petData.Images then
+            -- Determine image type based on shiny/mythic status
+            local imageType = "Normal"
+            if shiny == true and mythic == true then
+                imageType = "MythicShiny"
+            elseif shiny == true then
+                imageType = "Shiny"
+            elseif mythic == true then
+                imageType = "Mythic"
+            end
+            
+            -- Get the image asset ID
+            local petImageAsset = petData.Images[imageType] or petData.Images["Normal"]
+            
+            if petImageAsset then
+                -- Extract asset ID from rbxassetid:// format
+                local assetId = petImageAsset:match("rbxassetid://(%d+)")
+                
+                if assetId then
+                    -- Convert to Discord-compatible thumbnail URL
+                    petImageUrl = getThumbnailUrl(assetId)
+                    if petImageUrl then
+                        print("✓ Got thumbnail URL for " .. petName)
                     end
                 end
             end
-        end
-        
-        if petData then
-            if not petData.Images then
-                print("⚠ Pet data found but no Images table for: " .. petName)
-                print("  Pet data keys: " .. table.concat((function()
-                    local keys = {}
-                    for k in pairs(petData) do
-                        table.insert(keys, tostring(k))
-                    end
-                    return keys
-                end)(), ", "))
-            else
-                -- Determine image type based on shiny/mythic status
-                local imageType = "Normal"
-                if shiny == true and mythic == true then
-                    imageType = "MythicShiny"
-                elseif shiny == true then
-                    imageType = "Shiny"
-                elseif mythic == true then
-                    imageType = "Mythic"
-                end
-                
-                print("  Looking for image type: " .. imageType)
-                
-                -- Get the image asset ID
-                local petImageAsset = petData.Images[imageType] or petData.Images["Normal"]
-                
-                if not petImageAsset then
-                    print("⚠ No image found for type " .. imageType .. " or Normal")
-                    print("  Available image types: " .. table.concat((function()
-                        local keys = {}
-                        for k in pairs(petData.Images) do
-                            table.insert(keys, tostring(k))
-                        end
-                        return keys
-                    end)(), ", "))
-                else
-                    print("  Found image asset: " .. tostring(petImageAsset))
-                    -- Extract asset ID from rbxassetid:// format
-                    local assetId = petImageAsset:match("rbxassetid://(%d+)")
-                    
-                    if assetId then
-                        print("  Extracted asset ID: " .. assetId)
-                        -- Convert to Discord-compatible thumbnail URL
-                        petImageUrl = getThumbnailUrl(assetId)
-                        if petImageUrl then
-                            print("✓ Got thumbnail URL for " .. petName)
-                        else
-                            print("⚠ Could not get thumbnail URL for " .. petName .. " (asset ID: " .. assetId .. ")")
-                        end
-                    else
-                        print("⚠ Could not extract asset ID from: " .. tostring(petImageAsset))
-                    end
-                end
-            end
-        end
-    else
-        if not PetsData then
-            print("⚠ PetsData module not loaded")
-        end
-        if not petName then
-            print("⚠ Pet name is nil")
         end
     end
     
@@ -631,16 +525,16 @@ local function connectToEvents()
                                 local rarity = ItemUtil:GetRarity(pet)
                                 print("Rarity: " .. tostring(rarity))
                                 
-                                -- Check if Legendary or Secret
-                                if rarity == "Legendary" or rarity == "Secret" then
-                                    print(">>> " .. rarity .. " DETECTED! <<<")
+                                -- Check if Secret
+                                if rarity == "Secret" then
+                                    print(">>> SECRET DETECTED! <<<")
                                     print("Calling sendDiscordNotification...")
                                     
                                     -- Send webhook only (no in-game notifications)
                                     -- Pass the pet object so we can calculate probability
                                     sendDiscordNotification(petName, shiny, mythic, eggName, rarity, pet)
                                 else
-                                    print("Pet is " .. rarity .. " (not Legendary/Secret, skipping)")
+                                    print("Pet is " .. rarity .. " (not Secret, skipping)")
                                 end
                             end
                         end
@@ -957,4 +851,3 @@ end)
 
 print("✓ GUI created")
 print("Ready! Click 'Auto Hatch' to start hatching")
-
