@@ -5,6 +5,7 @@ local P = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
 local UIS = game:GetService("UserInputService")
 local VIM = game:GetService("VirtualInputManager")
+local HttpService = game:GetService("HttpService")
 local p = P.LocalPlayer
 
 print("========================================")
@@ -97,6 +98,43 @@ end
 
 loadModules()
 
+-- Function to get Discord-compatible thumbnail URL from Roblox asset ID
+local function getThumbnailUrl(assetId)
+    if not assetId then
+        return nil
+    end
+    
+    local url = "https://thumbnails.roproxy.com/v1/assets?assetIds=" .. assetId .. "&size=420x420&format=Png&isCircular=false"
+    
+    local success, response = pcall(function()
+        if HttpService and HttpService.GetAsync then
+            return HttpService:GetAsync(url)
+        elseif httpLib then
+            -- Fallback to httpLib for GET requests
+            local ok, body, status = httpLib(url, "GET", {}, "")
+            if ok and status == 200 then
+                return body
+            end
+        end
+        return nil
+    end)
+    
+    if success and response then
+        local success2, decoded = pcall(function()
+            if HttpService and HttpService.JSONDecode then
+                return HttpService:JSONDecode(response)
+            end
+            return nil
+        end)
+        
+        if success2 and decoded and decoded.data and decoded.data[1] and decoded.data[1].imageUrl then
+            return decoded.data[1].imageUrl
+        end
+    end
+    
+    return nil
+end
+
 -- HTTP for Delta Mobile (using the working method from testing)
 local httpLib = nil
 local httpLibName = nil
@@ -168,7 +206,7 @@ local function jsonEncode(t)
 end
 
 -- Function to send webhook (with 429 retry logic) - MUST be defined first
-local function sendDiscordNotificationInternal(petName, shiny, mythic, eggName, rarity, pet)
+local function sendDiscordNotificationInternal(petName, shiny, mythic, eggName, rarity, pet, petImageUrl)
     if not httpLib or webhookURL == "" then 
         print("✗ Cannot send: httpLib=" .. tostring(httpLib) .. ", webhookURL=" .. tostring(webhookURL))
         return true -- Return true to not retry if webhook not configured
@@ -272,13 +310,20 @@ local function sendDiscordNotificationInternal(petName, shiny, mythic, eggName, 
         timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
     }
     
+    -- Add thumbnail if pet image URL is available
+    if petImageUrl then
+        embed.thumbnail = {
+            url = petImageUrl
+        }
+    end
+    
     -- Put mention in content field (required for Discord to actually ping)
     local payload = {
         content = mention ~= "" and mention or nil,
         embeds = {embed}
     }
     
-    print("Sending webhook for " .. (probabilityText or rarity or "pet") .. " pet: " .. petName)
+    print("Sending webhook for " .. (probabilityText or rarity or "pet") .. " pet: " .. petName .. (petImageUrl and " (with thumbnail)" or " (no thumbnail)"))
     
     local headers = {["Content-Type"] = "application/json"}
     local json = jsonEncode(payload)
@@ -318,6 +363,7 @@ local function processWebhookQueue()
             local eggName = webhookData.eggName
             local rarity = webhookData.rarity
             local pet = webhookData.pet
+            local petImageUrl = webhookData.petImageUrl
             
             print("Processing webhook for: " .. tostring(petName))
             
@@ -327,7 +373,7 @@ local function processWebhookQueue()
             local success = false
             
             while retryCount < maxRetries and not success do
-                success = sendDiscordNotificationInternal(petName, shiny, mythic, eggName, rarity, pet)
+                success = sendDiscordNotificationInternal(petName, shiny, mythic, eggName, rarity, pet, petImageUrl)
                 
                 if not success then
                     retryCount = retryCount + 1
@@ -368,6 +414,44 @@ local function sendDiscordNotification(petName, shiny, mythic, eggName, rarity, 
         return
     end
     
+    -- Get pet image URL
+    local petImageUrl = nil
+    if PetsData and petName then
+        local success, petData = pcall(function()
+            return PetsData[petName]
+        end)
+        
+        if success and petData and petData.Images then
+            -- Determine image type based on shiny/mythic status
+            local imageType = "Normal"
+            if shiny == true and mythic == true then
+                imageType = "MythicShiny"
+            elseif shiny == true then
+                imageType = "Shiny"
+            elseif mythic == true then
+                imageType = "Mythic"
+            end
+            
+            -- Get the image asset ID
+            local petImageAsset = petData.Images[imageType] or petData.Images["Normal"]
+            
+            if petImageAsset then
+                -- Extract asset ID from rbxassetid:// format
+                local assetId = petImageAsset:match("rbxassetid://(%d+)")
+                
+                if assetId then
+                    -- Convert to Discord-compatible thumbnail URL
+                    petImageUrl = getThumbnailUrl(assetId)
+                    if petImageUrl then
+                        print("✓ Got thumbnail URL for " .. petName)
+                    else
+                        print("⚠ Could not get thumbnail URL for " .. petName)
+                    end
+                end
+            end
+        end
+    end
+    
     -- Add to queue
     table.insert(webhookQueue, {
         petName = petName,
@@ -375,7 +459,8 @@ local function sendDiscordNotification(petName, shiny, mythic, eggName, rarity, 
         mythic = mythic,
         eggName = eggName,
         rarity = rarity,
-        pet = pet
+        pet = pet,
+        petImageUrl = petImageUrl
     })
     
     print("Added to queue. Queue size: " .. #webhookQueue)
@@ -428,16 +513,16 @@ local function connectToEvents()
                                 local rarity = ItemUtil:GetRarity(pet)
                                 print("Rarity: " .. tostring(rarity))
                                 
-                                -- Check if Secret
-                                if rarity == "Secret" then
-                                    print(">>> SECRET DETECTED! <<<")
+                                -- Check if Legendary or Secret
+                                if rarity == "Legendary" or rarity == "Secret" then
+                                    print(">>> " .. rarity .. " DETECTED! <<<")
                                     print("Calling sendDiscordNotification...")
                                     
                                     -- Send webhook only (no in-game notifications)
                                     -- Pass the pet object so we can calculate probability
                                     sendDiscordNotification(petName, shiny, mythic, eggName, rarity, pet)
                                 else
-                                    print("Pet is " .. rarity .. " (not Secret, skipping)")
+                                    print("Pet is " .. rarity .. " (not Legendary/Secret, skipping)")
                                 end
                             end
                         end
