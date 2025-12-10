@@ -421,34 +421,101 @@ local function sendDiscordNotification(petName, shiny, mythic, eggName, rarity, 
             return PetsData[petName]
         end)
         
-        if success and petData and petData.Images then
-            -- Determine image type based on shiny/mythic status
-            local imageType = "Normal"
-            if shiny == true and mythic == true then
-                imageType = "MythicShiny"
-            elseif shiny == true then
-                imageType = "Shiny"
-            elseif mythic == true then
-                imageType = "Mythic"
-            end
-            
-            -- Get the image asset ID
-            local petImageAsset = petData.Images[imageType] or petData.Images["Normal"]
-            
-            if petImageAsset then
-                -- Extract asset ID from rbxassetid:// format
-                local assetId = petImageAsset:match("rbxassetid://(%d+)")
-                
-                if assetId then
-                    -- Convert to Discord-compatible thumbnail URL
-                    petImageUrl = getThumbnailUrl(assetId)
-                    if petImageUrl then
-                        print("✓ Got thumbnail URL for " .. petName)
-                    else
-                        print("⚠ Could not get thumbnail URL for " .. petName)
+        if not success then
+            print("⚠ Error accessing PetsData for " .. petName .. ": " .. tostring(petData))
+        elseif not petData then
+            -- Try to find the pet with different case or check if it exists
+            print("⚠ Pet data not found for: " .. petName)
+            print("  PetsData type: " .. type(PetsData))
+            if type(PetsData) == "table" then
+                -- Try to find a matching pet name (case-insensitive)
+                local foundPet = nil
+                local foundKey = nil
+                for key, value in pairs(PetsData) do
+                    if type(key) == "string" and string.lower(key) == string.lower(petName) then
+                        foundPet = value
+                        foundKey = key
+                        break
+                    end
+                end
+                if foundPet then
+                    print("  Found pet with different case: " .. foundKey)
+                    petData = foundPet
+                else
+                    -- Debug: print first few pet names to see structure
+                    local count = 0
+                    for key, value in pairs(PetsData) do
+                        if type(key) == "string" then
+                            print("  Sample pet name: " .. key)
+                            count = count + 1
+                            if count >= 3 then break end
+                        end
                     end
                 end
             end
+        end
+        
+        if petData then
+            if not petData.Images then
+                print("⚠ Pet data found but no Images table for: " .. petName)
+                print("  Pet data keys: " .. table.concat((function()
+                    local keys = {}
+                    for k in pairs(petData) do
+                        table.insert(keys, tostring(k))
+                    end
+                    return keys
+                end)(), ", "))
+            else
+                -- Determine image type based on shiny/mythic status
+                local imageType = "Normal"
+                if shiny == true and mythic == true then
+                    imageType = "MythicShiny"
+                elseif shiny == true then
+                    imageType = "Shiny"
+                elseif mythic == true then
+                    imageType = "Mythic"
+                end
+                
+                print("  Looking for image type: " .. imageType)
+                
+                -- Get the image asset ID
+                local petImageAsset = petData.Images[imageType] or petData.Images["Normal"]
+                
+                if not petImageAsset then
+                    print("⚠ No image found for type " .. imageType .. " or Normal")
+                    print("  Available image types: " .. table.concat((function()
+                        local keys = {}
+                        for k in pairs(petData.Images) do
+                            table.insert(keys, tostring(k))
+                        end
+                        return keys
+                    end)(), ", "))
+                else
+                    print("  Found image asset: " .. tostring(petImageAsset))
+                    -- Extract asset ID from rbxassetid:// format
+                    local assetId = petImageAsset:match("rbxassetid://(%d+)")
+                    
+                    if assetId then
+                        print("  Extracted asset ID: " .. assetId)
+                        -- Convert to Discord-compatible thumbnail URL
+                        petImageUrl = getThumbnailUrl(assetId)
+                        if petImageUrl then
+                            print("✓ Got thumbnail URL for " .. petName)
+                        else
+                            print("⚠ Could not get thumbnail URL for " .. petName .. " (asset ID: " .. assetId .. ")")
+                        end
+                    else
+                        print("⚠ Could not extract asset ID from: " .. tostring(petImageAsset))
+                    end
+                end
+            end
+        end
+    else
+        if not PetsData then
+            print("⚠ PetsData module not loaded")
+        end
+        if not petName then
+            print("⚠ Pet name is nil")
         end
     end
     
@@ -839,3 +906,4 @@ end)
 
 print("✓ GUI created")
 print("Ready! Click 'Auto Hatch' to start hatching")
+
