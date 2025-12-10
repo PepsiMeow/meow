@@ -22,101 +22,105 @@ local FormatCommas = nil
 
 -- Settings
 local autoHatchEnabled = false
-local webhookURL = ""
-local discordUserID = ""
+local webhookURL = "" -- Will be loaded from saved settings
+local discordUserID = "" -- Will be loaded from saved settings
 
 -- Settings file path
 local SETTINGS_FILE = "bubblegum_settings.json"
 
 -- Save settings to file
 local function saveSettings()
-    local settings = {
-        webhookURL = webhookURL,
-        discordUserID = discordUserID
-    }
-    
-    local success = false
-    
-    -- Try writefile first (common in executors)
-    if writefile then
-        local success1, err = pcall(function()
-            local json = HttpService:JSONEncode(settings)
-            writefile(SETTINGS_FILE, json)
-            return true
-        end)
-        if success1 then
-            success = true
-            print("✓ Settings saved to file")
+    pcall(function()
+        local settings = {
+            webhookURL = webhookURL or "",
+            discordUserID = discordUserID or ""
+        }
+        
+        local success = false
+        
+        -- Try writefile first (common in executors)
+        if writefile and HttpService and HttpService.JSONEncode then
+            local success1, err = pcall(function()
+                local json = HttpService:JSONEncode(settings)
+                writefile(SETTINGS_FILE, json)
+                return true
+            end)
+            if success1 then
+                success = true
+                print("✓ Settings saved to file")
+            end
         end
-    end
-    
-    -- Fallback to getgenv/setgenv if available
-    if not success and getgenv and setgenv then
-        local success2 = pcall(function()
-            setgenv("BubblegumWebhookURL", webhookURL)
-            setgenv("BubblegumDiscordUserID", discordUserID)
-            return true
-        end)
-        if success2 then
-            success = true
-            print("✓ Settings saved to global environment")
+        
+        -- Fallback to getgenv/setgenv if available
+        if not success and getgenv and setgenv then
+            local success2 = pcall(function()
+                setgenv("BubblegumWebhookURL", webhookURL or "")
+                setgenv("BubblegumDiscordUserID", discordUserID or "")
+                return true
+            end)
+            if success2 then
+                success = true
+                print("✓ Settings saved to global environment")
+            end
         end
-    end
-    
-    if not success then
-        print("⚠ Could not save settings (no file system available)")
-    end
+        
+        if not success then
+            -- Silently fail - don't spam console
+        end
+    end)
 end
 
 -- Load settings from file
 local function loadSettings()
-    local loaded = false
-    
-    -- Try readfile first (common in executors)
-    if readfile then
-        local success1, data = pcall(function()
-            if isfile and isfile(SETTINGS_FILE) then
-                local content = readfile(SETTINGS_FILE)
-                if content then
-                    local decoded = HttpService:JSONDecode(content)
-                    if decoded then
-                        webhookURL = decoded.webhookURL or ""
-                        discordUserID = decoded.discordUserID or ""
-                        loaded = true
-                        print("✓ Settings loaded from file")
-                        return true
+    pcall(function()
+        local loaded = false
+        
+        -- Try readfile first (common in executors)
+        if readfile and isfile and HttpService and HttpService.JSONDecode then
+            local success1, data = pcall(function()
+                if isfile(SETTINGS_FILE) then
+                    local content = readfile(SETTINGS_FILE)
+                    if content and content ~= "" then
+                        local decoded = HttpService:JSONDecode(content)
+                        if decoded and type(decoded) == "table" then
+                            webhookURL = decoded.webhookURL or ""
+                            discordUserID = decoded.discordUserID or ""
+                            loaded = true
+                            print("✓ Settings loaded from file")
+                            return true
+                        end
                     end
                 end
+                return false
+            end)
+            if success1 and loaded then
+                return
             end
-            return false
-        end)
-        if success1 and loaded then
-            return
         end
-    end
-    
-    -- Fallback to getgenv if available
-    if getgenv then
-        local success2 = pcall(function()
-            local savedURL = getgenv("BubblegumWebhookURL")
-            local savedID = getgenv("BubblegumDiscordUserID")
-            if savedURL then
-                webhookURL = savedURL
-                loaded = true
-            end
-            if savedID then
-                discordUserID = savedID
-                loaded = true
-            end
-            if loaded then
-                print("✓ Settings loaded from global environment")
-            end
-        end)
-    end
-    
-    if not loaded then
-        print("ℹ No saved settings found (using defaults)")
-    end
+        
+        -- Fallback to getgenv if available
+        if getgenv then
+            local success2 = pcall(function()
+                local savedURL = getgenv("BubblegumWebhookURL")
+                local savedID = getgenv("BubblegumDiscordUserID")
+                if savedURL and type(savedURL) == "string" then
+                    webhookURL = savedURL
+                    loaded = true
+                end
+                if savedID and type(savedID) == "string" then
+                    discordUserID = savedID
+                    loaded = true
+                end
+                if loaded then
+                    print("✓ Settings loaded from global environment")
+                end
+            end)
+        end
+        
+        if not loaded then
+            print("ℹ No saved settings found (using defaults)")
+        end
+    end)
 end
 
 -- Webhook queue for rate limiting
@@ -795,7 +799,7 @@ webhookInput.Size = UDim2.new(0, 320, 0, 30)
 webhookInput.Position = UDim2.new(0, 15, 0, 130)
 webhookInput.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 webhookInput.TextColor3 = Color3.fromRGB(255, 255, 255)
-webhookInput.Text = webhookURL -- Set from loaded settings
+webhookInput.Text = webhookURL or "" -- Set from loaded settings
 webhookInput.PlaceholderText = "https://discord.com/api/webhooks/..."
 webhookInput.PlaceholderColor3 = Color3.fromRGB(150, 150, 150)
 webhookInput.TextSize = 10
@@ -822,7 +826,7 @@ userIDInput.Size = UDim2.new(0, 320, 0, 30)
 userIDInput.Position = UDim2.new(0, 15, 0, 190)
 userIDInput.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 userIDInput.TextColor3 = Color3.fromRGB(255, 255, 255)
-userIDInput.Text = discordUserID -- Set from loaded settings
+userIDInput.Text = discordUserID or "" -- Set from loaded settings
 userIDInput.PlaceholderText = "123456789012345678"
 userIDInput.PlaceholderColor3 = Color3.fromRGB(150, 150, 150)
 userIDInput.TextSize = 11
