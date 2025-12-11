@@ -11,6 +11,7 @@ local p = P.LocalPlayer
 print("========================================")
 print("BUBBLEGUM AUTO HATCH & NOTIFIER")
 print("Version: 2.0")
+print("DETECT_LEGENDARIES: " .. tostring(DETECT_LEGENDARIES))
 print("========================================")
 
 -- Load required modules
@@ -26,7 +27,7 @@ local webhookURL = ""
 local discordUserID = ""
 
 -- Detection Settings
-local DETECT_LEGENDARIES = false -- Set to true to also detect Legendary pets (for testing)
+local DETECT_LEGENDARIES = true -- Set to true to also detect Legendary pets (for testing)
 
 -- Special Pets (pets that should receive special notifications)
 -- Add pet names here (case insensitive, supports spaces)
@@ -101,6 +102,7 @@ end
 -- Webhook queue for rate limiting
 local webhookQueue = {}
 local isSendingWebhook = false
+local messagesRemainingWithDelay = 0 -- Counter for messages that need 2s delay after rate limit
 
 -- Script state
 local scriptActive = true
@@ -632,6 +634,13 @@ local function processWebhookQueue()
                         end
                     end
                 end
+                
+                -- If still failed after max retries, add back to front of queue and increase delay
+                if not success then
+                    print("✗ Debug webhook failed after " .. maxRetries .. " retries, re-queuing to front")
+                    table.insert(webhookQueue, 1, webhookData)
+                    messagesRemainingWithDelay = 5 -- Set delay for next 5 messages
+                end
             else
                 -- Regular or special notification
                 local petName = webhookData.petName
@@ -666,11 +675,24 @@ local function processWebhookQueue()
                         end
                     end
                 end
+                
+                -- If still failed after max retries, add back to front of queue and increase delay
+                if not success then
+                    print("✗ Webhook failed after " .. maxRetries .. " retries, re-queuing to front")
+                    table.insert(webhookQueue, 1, webhookData)
+                    messagesRemainingWithDelay = 5 -- Set delay for next 5 messages
+                end
             end
             
-            -- Wait 1 second before sending next message in queue
+            -- Determine delay based on rate limit counter
+            local delay = (messagesRemainingWithDelay > 0) and 2 or 1
+            if messagesRemainingWithDelay > 0 then
+                messagesRemainingWithDelay = messagesRemainingWithDelay - 1
+            end
+            
+            -- Wait before sending next message in queue
             if #webhookQueue > 0 then
-                task.wait(1)
+                task.wait(delay)
             end
         end
         
@@ -820,11 +842,15 @@ local function connectToEvents()
                             local isSecret = rarity == "Secret"
                             
                             -- Check if Legendary (only if flag is enabled)
-                            local isLegendary = DETECT_LEGENDARIES and rarity == "Legendary"
+                            -- If DETECT_LEGENDARIES is false, isLegendary will always be false
+                            local isLegendary = false
+                            if DETECT_LEGENDARIES then
+                                isLegendary = (rarity == "Legendary")
+                            end
                             
                             -- Send notification if:
                             -- 1. It's a Secret pet, OR
-                            -- 2. It's a Legendary pet (if detection is enabled), OR
+                            -- 2. It's a Legendary pet (only if DETECT_LEGENDARIES is true), OR
                             -- 3. It's a special pet (regardless of rarity)
                             if isSecret or isLegendary or isSpecial then
                                 if isSecret then
