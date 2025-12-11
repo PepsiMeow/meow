@@ -41,6 +41,12 @@ local SPECIAL_PETS = {
     -- Add more pet names here as needed
 }
 
+-- Pre-compute lowercase special pets for faster lookup (optimization)
+local SPECIAL_PETS_LOWER = {}
+for _, petName in ipairs(SPECIAL_PETS) do
+    SPECIAL_PETS_LOWER[string.lower(petName)] = true
+end
+
 -- Settings file path
 local SETTINGS_FILE = "bubblegum_settings.json"
 
@@ -99,21 +105,6 @@ local isSendingWebhook = false
 -- Script state
 local scriptActive = true
 local hatchEventConnection = nil
-local function restoreMobileInput()
-    -- Try to force the client back to touch/mobile input by sending a fake tap.
-    -- This is best-effort; if SendTouchEvent isn't available it will safely skip.
-    local cam = workspace.CurrentCamera
-    if not cam then return end
-    local size = cam.ViewportSize
-    local x = size.X / 2
-    local y = size.Y / 2
-    if VIM and VIM.SendTouchEvent then
-        pcall(function()
-            VIM:SendTouchEvent(x, y, 0, true, game, nil)
-            VIM:SendTouchEvent(x, y, 0, false, game, nil)
-        end)
-    end
-end
 
 -- Load modules
 local function loadModules()
@@ -290,15 +281,10 @@ local function jsonEncode(t)
 end
 
 -- Helper function to check if a pet is in the special pets list (case insensitive)
+-- Optimized: uses pre-computed lowercase lookup table
 local function isSpecialPet(petName)
     if not petName then return false end
-    local lowerPetName = string.lower(petName)
-    for _, specialPet in ipairs(SPECIAL_PETS) do
-        if string.lower(specialPet) == lowerPetName then
-            return true
-        end
-    end
-    return false
+    return SPECIAL_PETS_LOWER[string.lower(petName)] == true
 end
 
 -- Helper function to check if rarity is Infinity (case insensitive)
@@ -595,8 +581,6 @@ local function sendDiscordNotificationInternal(petName, shiny, mythic, eggName, 
         embeds = {embed}
     }
     
-    print("Sending webhook for " .. (probabilityText or rarity or "pet") .. " pet: " .. petName)
-    
     local headers = {["Content-Type"] = "application/json"}
     local json = jsonEncode(payload)
     local success, response, status = httpLib(webhookURL, "POST", headers, json)
@@ -623,7 +607,6 @@ local function processWebhookQueue()
         return
     end
     
-    print("Starting to process webhook queue. Items: " .. #webhookQueue)
     isSendingWebhook = true
     
     spawn(function()
@@ -632,7 +615,7 @@ local function processWebhookQueue()
             
             -- Check if this is a debug message
             if webhookData.isDebug and webhookData.debugMessage then
-                print("Processing debug webhook: " .. webhookData.debugMessage)
+                -- Processing debug webhook
                 
                 local maxRetries = 5
                 local retryCount = 0
@@ -661,7 +644,7 @@ local function processWebhookQueue()
                 local isSpecial = webhookData.isSpecial == true
                 local isInfinity = webhookData.isInfinity == true
                 
-                print("Processing webhook for: " .. tostring(petName) .. (isSpecial and " (SPECIAL)" or ""))
+                -- Processing webhook notification
                 
                 -- Try sending with retry on rate limit
                 local maxRetries = 5
@@ -691,7 +674,6 @@ local function processWebhookQueue()
             end
         end
         
-        print("Queue processing complete")
         isSendingWebhook = false
     end)
 end
@@ -702,8 +684,6 @@ local function sendDiscordNotification(petName, shiny, mythic, eggName, rarity, 
     if not scriptActive then
         return
     end
-    
-    print("sendDiscordNotification called for: " .. tostring(petName))
     
     if webhookURL == "" then
         print("✗ Webhook URL not set! Cannot send notification.")
@@ -743,9 +723,6 @@ local function sendDiscordNotification(petName, shiny, mythic, eggName, rarity, 
                 if assetId then
                     -- Convert to Discord-compatible thumbnail URL
                     petImageUrl = getThumbnailUrl(assetId)
-                    if petImageUrl then
-                        print("✓ Got thumbnail URL for " .. petName)
-                    end
                 end
             end
         end
@@ -773,13 +750,13 @@ local function sendDiscordNotification(petName, shiny, mythic, eggName, rarity, 
         -- Add debug message to queue (separate message, no ping)
         local debugMessage = isInfinity and 
             "The rarity of this pet is specified as Infinity" or 
-            "The rarity is not infinity"
+            ("The rarity is not infinity. Rarity: " .. (rarity or "Unknown"))
         table.insert(webhookQueue, {
             debugMessage = debugMessage,
             isDebug = true
         })
         
-        print("Added special pet notification and debug message to queue. Queue size: " .. #webhookQueue)
+        -- Special pet notification and debug message added to queue
     else
         -- Add regular notification to queue
         table.insert(webhookQueue, {
@@ -793,7 +770,7 @@ local function sendDiscordNotification(petName, shiny, mythic, eggName, rarity, 
             isSpecial = false
         })
         
-        print("Added to queue. Queue size: " .. #webhookQueue)
+        -- Regular notification added to queue
     end
     
     -- Start processing queue if not already processing
@@ -819,68 +796,52 @@ local function connectToEvents()
                 return
             end
             
-            print("=== HatchEgg Event Fired ===")
-            
-            if type(hatchedTable) == "table" then
-                print("hatchedTable is table")
-                if hatchedTable.Pets then
-                    print("Pets found: " .. tostring(type(hatchedTable.Pets)))
-                    local eggName = hatchedTable.Name
-                    print("Egg: " .. tostring(eggName))
+            -- Optimized: Removed verbose prints that fire on every hatch
+            if type(hatchedTable) == "table" and hatchedTable.Pets then
+                local eggName = hatchedTable.Name
+                
+                for i = 1, 20 do
+                    local petData = hatchedTable.Pets[i]
+                    if not petData then break end
                     
-                    for i = 1, 20 do
-                        local petData = hatchedTable.Pets[i]
-                        if not petData then break end
+                    if type(petData) == "table" and petData.Pet then
+                        local pet = petData.Pet
+                        local petName = pet.Name
+                        local shiny = pet.Shiny == true
+                        local mythic = pet.Mythic == true
                         
-                        if type(petData) == "table" and petData.Pet then
-                            local pet = petData.Pet
-                            local petName = pet.Name
-                            local shiny = pet.Shiny == true
-                            local mythic = pet.Mythic == true
+                        if petName and ItemUtil then
+                            local rarity = ItemUtil:GetRarity(pet)
                             
-                            print("Pet " .. i .. ": " .. tostring(petName) .. " (Shiny: " .. tostring(shiny) .. ", Mythic: " .. tostring(mythic) .. ")")
+                            -- Check if this is a special pet (regardless of rarity)
+                            local isSpecial = isSpecialPet(petName)
                             
-                            if petName and ItemUtil then
-                                local rarity = ItemUtil:GetRarity(pet)
-                                print("Rarity: " .. tostring(rarity))
-                                
-                                -- Check if this is a special pet (regardless of rarity)
-                                local isSpecial = isSpecialPet(petName)
-                                
-                                -- Check if Secret
-                                local isSecret = rarity == "Secret"
-                                
-                                -- Check if Legendary (only if flag is enabled)
-                                local isLegendary = DETECT_LEGENDARIES and rarity == "Legendary"
-                                
-                                -- Send notification if:
-                                -- 1. It's a Secret pet, OR
-                                -- 2. It's a Legendary pet (if detection is enabled), OR
-                                -- 3. It's a special pet (regardless of rarity)
-                                if isSecret or isLegendary or isSpecial then
-                                    if isSecret then
-                                        print(">>> SECRET DETECTED! <<<")
-                                    elseif isLegendary then
-                                        print(">>> LEGENDARY DETECTED! <<<")
-                                    elseif isSpecial then
-                                        print(">>> SPECIAL PET DETECTED! <<<")
-                                    end
-                                    print("Calling sendDiscordNotification...")
-                                    
-                                    -- Send webhook only (no in-game notifications)
-                                    -- Pass the pet object so we can calculate probability
-                                    sendDiscordNotification(petName, shiny, mythic, eggName, rarity, pet)
-                                else
-                                    print("Pet is " .. rarity .. " (not Secret/Legendary/Special, skipping)")
+                            -- Check if Secret
+                            local isSecret = rarity == "Secret"
+                            
+                            -- Check if Legendary (only if flag is enabled)
+                            local isLegendary = DETECT_LEGENDARIES and rarity == "Legendary"
+                            
+                            -- Send notification if:
+                            -- 1. It's a Secret pet, OR
+                            -- 2. It's a Legendary pet (if detection is enabled), OR
+                            -- 3. It's a special pet (regardless of rarity)
+                            if isSecret or isLegendary or isSpecial then
+                                if isSecret then
+                                    print(">>> SECRET DETECTED! <<<")
+                                elseif isLegendary then
+                                    print(">>> LEGENDARY DETECTED! <<<")
+                                elseif isSpecial then
+                                    print(">>> SPECIAL PET DETECTED! <<<")
                                 end
+                                
+                                -- Send webhook only (no in-game notifications)
+                                -- Pass the pet object so we can calculate probability
+                                sendDiscordNotification(petName, shiny, mythic, eggName, rarity, pet)
                             end
                         end
                     end
-                else
-                    print("✗ No Pets in hatchedTable")
                 end
-            else
-                print("✗ hatchedTable is not a table: " .. type(hatchedTable))
             end
         end)
     end)
