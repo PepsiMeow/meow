@@ -402,8 +402,8 @@ local function sendSpecialDiscordNotificationInternal(petName, shiny, mythic, eg
         end
     end
     
-    -- Build description with infinity message
-    local description = "**" .. playerName .. "** hatched " .. article .. " **" .. fullPetName .. "**!\n\n✨ **You hatched an infinity!** ✨"
+    -- Build description (infinity message is now in title)
+    local description = "**" .. playerName .. "** hatched " .. article .. " **" .. fullPetName .. "**!"
     
     -- Build fields
     local fields = {
@@ -431,7 +431,7 @@ local function sendSpecialDiscordNotificationInternal(petName, shiny, mythic, eg
     
     -- Build embed
     local embed = {
-        title = "🎉 Congratulations!",
+        title = "🎉 Congratulations! You hatched an ***INFINITY***! 🎉",
         description = description,
         color = embedColor,
         fields = fields,
