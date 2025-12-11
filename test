@@ -25,6 +25,16 @@ local autoHatchEnabled = false
 local webhookURL = ""
 local discordUserID = ""
 
+-- Detection Settings
+local DETECT_LEGENDARIES = true -- Set to true to also detect Legendary pets (for testing)
+
+-- Special Pets (pets that should receive special notifications)
+-- Add pet names here (case insensitive, supports spaces)
+local SPECIAL_PETS = {
+    "Neon Elemental",
+    -- Add more pet names here as needed
+}
+
 -- Settings file path
 local SETTINGS_FILE = "bubblegum_settings.json"
 
@@ -273,6 +283,194 @@ local function jsonEncode(t)
     return encodeValue(t, 0)
 end
 
+-- Helper function to check if a pet is in the special pets list (case insensitive)
+local function isSpecialPet(petName)
+    if not petName then return false end
+    local lowerPetName = string.lower(petName)
+    for _, specialPet in ipairs(SPECIAL_PETS) do
+        if string.lower(specialPet) == lowerPetName then
+            return true
+        end
+    end
+    return false
+end
+
+-- Helper function to check if rarity is Infinity (case insensitive)
+local function isInfinityRarity(rarity)
+    if not rarity then return false end
+    return string.lower(tostring(rarity)) == "infinity"
+end
+
+-- Function to send debug webhook (no ping, plain text)
+local function sendDebugWebhook(message)
+    if not httpLib or webhookURL == "" then 
+        return true
+    end
+    
+    local embed = {
+        title = "🔍 Debug Info",
+        description = message,
+        color = 8421504, -- Grey color for debug
+        timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+    }
+    
+    local payload = {
+        embeds = {embed}
+        -- No content field = no ping
+    }
+    
+    local jsonPayload = jsonEncode(payload)
+    
+    local success, response, status = pcall(function()
+        return httpLib(webhookURL, "POST", {
+            ["Content-Type"] = "application/json"
+        }, jsonPayload)
+    end)
+    
+    if success and status == 200 then
+        print("✓ Debug webhook sent successfully")
+        return true
+    elseif success and status == 429 then
+        print("✗ Debug webhook rate limited (429)")
+        return false -- Return false to trigger retry
+    else
+        print("✗ Debug webhook failed: status=" .. tostring(status))
+        return true -- Return true for other errors to not retry
+    end
+end
+
+-- Function to send special webhook (with infinity colors and message)
+local function sendSpecialDiscordNotificationInternal(petName, shiny, mythic, eggName, rarity, pet, petImageUrl, isInfinity)
+    if not httpLib or webhookURL == "" then 
+        print("✗ Cannot send: httpLib=" .. tostring(httpLib) .. ", webhookURL=" .. tostring(webhookURL))
+        return true
+    end
+    
+    -- Get player name
+    local playerName = p.Name or "Unknown Player"
+    
+    -- Build pet name with prefix
+    local fullPetName = petName
+    if shiny == true and mythic == true then
+        fullPetName = "Shiny Mythic " .. petName
+    elseif shiny == true then
+        fullPetName = "Shiny " .. petName
+    elseif mythic == true then
+        fullPetName = "Mythic " .. petName
+    end
+    
+    -- Determine color based on pet type (neon colors for special pets)
+    local embedColor = 65535 -- Bright neon blue/cyan for normal special pets
+    if shiny == true and mythic == true then
+        embedColor = 65280 -- Neon green for Shiny Mythic special pets
+    elseif shiny == true then
+        embedColor = 16753920 -- Neon orange for Shiny special pets
+    elseif mythic == true then
+        embedColor = 16711935 -- Neon pink for Mythic special pets
+    else
+        embedColor = 65535 -- Bright neon blue/cyan for normal special pets
+    end
+    
+    -- Build mention (for Discord ping)
+    local mention = discordUserID ~= "" and ("<@" .. discordUserID .. ">") or ""
+    
+    -- Calculate probability if PetUtil is available
+    local probabilityText = nil
+    if PetUtil and pet then
+        local success, petChance = pcall(function()
+            return PetUtil:GetChance(pet)
+        end)
+        if success and petChance and petChance > 0 then
+            local denominator = math.ceil(100 / petChance)
+            if FormatCommas then
+                probabilityText = "1/" .. FormatCommas(denominator)
+            else
+                local formatted = tostring(denominator)
+                formatted = formatted:reverse():gsub("(%d%d%d)", "%1,"):reverse()
+                formatted = formatted:gsub("^,", "")
+                probabilityText = "1/" .. formatted
+            end
+        end
+    end
+    
+    -- Determine "a" or "an" for the pet name
+    local article = "a"
+    if not shiny and not mythic and petName then
+        local firstLetter = string.lower(string.sub(petName, 1, 1))
+        if firstLetter == "a" or firstLetter == "e" or firstLetter == "i" or firstLetter == "o" or firstLetter == "u" then
+            article = "an"
+        end
+    end
+    
+    -- Build description with infinity message
+    local description = "**" .. playerName .. "** hatched " .. article .. " **" .. fullPetName .. "**!\n\n✨ **You hatched an infinity!** ✨"
+    
+    -- Build fields
+    local fields = {
+        {
+            name = "Hatched",
+            value = fullPetName,
+            inline = false
+        }
+    }
+    
+    -- Add probability or rarity field
+    if probabilityText then
+        table.insert(fields, {
+            name = "Rarity",
+            value = probabilityText,
+            inline = true
+        })
+    elseif rarity then
+        table.insert(fields, {
+            name = "Rarity",
+            value = rarity,
+            inline = true
+        })
+    end
+    
+    -- Build embed
+    local embed = {
+        title = "🎉 Congratulations!",
+        description = description,
+        color = embedColor,
+        fields = fields,
+        timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+    }
+    
+    -- Add thumbnail if pet image URL is available
+    if petImageUrl then
+        embed.thumbnail = {
+            url = petImageUrl
+        }
+    end
+    
+    -- Build payload
+    local payload = {
+        content = mention, -- Ping in content field
+        embeds = {embed}
+    }
+    
+    local jsonPayload = jsonEncode(payload)
+    
+    local success, response, status = pcall(function()
+        return httpLib(webhookURL, "POST", {
+            ["Content-Type"] = "application/json"
+        }, jsonPayload)
+    end)
+    
+    if success and status == 200 then
+        print("✓ Special Discord notification sent successfully")
+        return true
+    elseif success and status == 429 then
+        print("✗ Special Discord notification rate limited (429)")
+        return false -- Return false to trigger retry
+    else
+        print("✗ Special Discord notification failed: status=" .. tostring(status))
+        return true -- Return true for other errors to not retry
+    end
+end
+
 -- Function to send webhook (with 429 retry logic) - MUST be defined first
 local function sendDiscordNotificationInternal(petName, shiny, mythic, eggName, rarity, pet, petImageUrl)
     if not httpLib or webhookURL == "" then 
@@ -425,29 +623,58 @@ local function processWebhookQueue()
     spawn(function()
         while #webhookQueue > 0 and scriptActive do
             local webhookData = table.remove(webhookQueue, 1)
-            local petName = webhookData.petName
-            local shiny = webhookData.shiny
-            local mythic = webhookData.mythic
-            local eggName = webhookData.eggName
-            local rarity = webhookData.rarity
-            local pet = webhookData.pet
-            local petImageUrl = webhookData.petImageUrl
             
-            print("Processing webhook for: " .. tostring(petName))
-            
-            -- Try sending with retry on rate limit
-            local maxRetries = 5
-            local retryCount = 0
-            local success = false
-            
-            while retryCount < maxRetries and not success do
-                success = sendDiscordNotificationInternal(petName, shiny, mythic, eggName, rarity, pet, petImageUrl)
+            -- Check if this is a debug message
+            if webhookData.isDebug and webhookData.debugMessage then
+                print("Processing debug webhook: " .. webhookData.debugMessage)
                 
-                if not success then
-                    retryCount = retryCount + 1
-                    if retryCount < maxRetries then
-                        print("Rate limited, waiting 1 second before retry " .. retryCount .. "/" .. maxRetries)
-                        task.wait(1)
+                local maxRetries = 5
+                local retryCount = 0
+                local success = false
+                
+                while retryCount < maxRetries and not success do
+                    success = sendDebugWebhook(webhookData.debugMessage)
+                    
+                    if not success then
+                        retryCount = retryCount + 1
+                        if retryCount < maxRetries then
+                            print("Rate limited, waiting 1 second before retry " .. retryCount .. "/" .. maxRetries)
+                            task.wait(1)
+                        end
+                    end
+                end
+            else
+                -- Regular or special notification
+                local petName = webhookData.petName
+                local shiny = webhookData.shiny
+                local mythic = webhookData.mythic
+                local eggName = webhookData.eggName
+                local rarity = webhookData.rarity
+                local pet = webhookData.pet
+                local petImageUrl = webhookData.petImageUrl
+                local isSpecial = webhookData.isSpecial == true
+                local isInfinity = webhookData.isInfinity == true
+                
+                print("Processing webhook for: " .. tostring(petName) .. (isSpecial and " (SPECIAL)" or ""))
+                
+                -- Try sending with retry on rate limit
+                local maxRetries = 5
+                local retryCount = 0
+                local success = false
+                
+                while retryCount < maxRetries and not success do
+                    if isSpecial then
+                        success = sendSpecialDiscordNotificationInternal(petName, shiny, mythic, eggName, rarity, pet, petImageUrl, isInfinity)
+                    else
+                        success = sendDiscordNotificationInternal(petName, shiny, mythic, eggName, rarity, pet, petImageUrl)
+                    end
+                    
+                    if not success then
+                        retryCount = retryCount + 1
+                        if retryCount < maxRetries then
+                            print("Rate limited, waiting 1 second before retry " .. retryCount .. "/" .. maxRetries)
+                            task.wait(1)
+                        end
                     end
                 end
             end
@@ -518,18 +745,50 @@ local function sendDiscordNotification(petName, shiny, mythic, eggName, rarity, 
         end
     end
     
-    -- Add to queue
-    table.insert(webhookQueue, {
-        petName = petName,
-        shiny = shiny,
-        mythic = mythic,
-        eggName = eggName,
-        rarity = rarity,
-        pet = pet,
-        petImageUrl = petImageUrl
-    })
+    -- Check if this is a special pet
+    local isSpecial = isSpecialPet(petName)
+    local isInfinity = isInfinityRarity(rarity)
     
-    print("Added to queue. Queue size: " .. #webhookQueue)
+    -- If special pet, send special notification and debug message
+    if isSpecial then
+        -- Add special notification to queue
+        table.insert(webhookQueue, {
+            petName = petName,
+            shiny = shiny,
+            mythic = mythic,
+            eggName = eggName,
+            rarity = rarity,
+            pet = pet,
+            petImageUrl = petImageUrl,
+            isSpecial = true,
+            isInfinity = isInfinity
+        })
+        
+        -- Add debug message to queue (separate message, no ping)
+        local debugMessage = isInfinity and 
+            "The rarity of this pet is specified as Infinity" or 
+            "The rarity is not infinity"
+        table.insert(webhookQueue, {
+            debugMessage = debugMessage,
+            isDebug = true
+        })
+        
+        print("Added special pet notification and debug message to queue. Queue size: " .. #webhookQueue)
+    else
+        -- Add regular notification to queue
+        table.insert(webhookQueue, {
+            petName = petName,
+            shiny = shiny,
+            mythic = mythic,
+            eggName = eggName,
+            rarity = rarity,
+            pet = pet,
+            petImageUrl = petImageUrl,
+            isSpecial = false
+        })
+        
+        print("Added to queue. Queue size: " .. #webhookQueue)
+    end
     
     -- Start processing queue if not already processing
     processWebhookQueue()
@@ -579,16 +838,34 @@ local function connectToEvents()
                                 local rarity = ItemUtil:GetRarity(pet)
                                 print("Rarity: " .. tostring(rarity))
                                 
+                                -- Check if this is a special pet (regardless of rarity)
+                                local isSpecial = isSpecialPet(petName)
+                                
                                 -- Check if Secret
-                                if rarity == "Secret" then
-                                    print(">>> SECRET DETECTED! <<<")
+                                local isSecret = rarity == "Secret"
+                                
+                                -- Check if Legendary (only if flag is enabled)
+                                local isLegendary = DETECT_LEGENDARIES and rarity == "Legendary"
+                                
+                                -- Send notification if:
+                                -- 1. It's a Secret pet, OR
+                                -- 2. It's a Legendary pet (if detection is enabled), OR
+                                -- 3. It's a special pet (regardless of rarity)
+                                if isSecret or isLegendary or isSpecial then
+                                    if isSecret then
+                                        print(">>> SECRET DETECTED! <<<")
+                                    elseif isLegendary then
+                                        print(">>> LEGENDARY DETECTED! <<<")
+                                    elseif isSpecial then
+                                        print(">>> SPECIAL PET DETECTED! <<<")
+                                    end
                                     print("Calling sendDiscordNotification...")
                                     
                                     -- Send webhook only (no in-game notifications)
                                     -- Pass the pet object so we can calculate probability
                                     sendDiscordNotification(petName, shiny, mythic, eggName, rarity, pet)
                                 else
-                                    print("Pet is " .. rarity .. " (not Secret, skipping)")
+                                    print("Pet is " .. rarity .. " (not Secret/Legendary/Special, skipping)")
                                 end
                             end
                         end
