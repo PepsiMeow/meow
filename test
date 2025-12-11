@@ -32,6 +32,12 @@ local DETECT_LEGENDARIES = true -- Set to true to also detect Legendary pets (fo
 -- Add pet names here (case insensitive, supports spaces)
 local SPECIAL_PETS = {
     "Neon Elemental",
+    "Inferno Dragon",
+    "Morning Star",
+    "Christmas Robot",
+    "Rumblecon God",
+    "Leviathan",
+    "Sylently's Pet"
     -- Add more pet names here as needed
 }
 
