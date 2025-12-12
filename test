@@ -702,8 +702,15 @@ end
 
 -- Public function to queue webhook (handles rate limiting)
 local function sendDiscordNotification(petName, shiny, mythic, eggName, rarity, pet)
+    print("[WEBHOOK] sendDiscordNotification called for: " .. tostring(petName))
+    print("[WEBHOOK] Webhook URL set: " .. (webhookURL ~= "" and "YES (" .. string.sub(webhookURL, 1, 40) .. "...)" or "NO"))
+    print("[WEBHOOK] Discord User ID set: " .. (discordUserID ~= "" and "YES (" .. discordUserID .. ")" or "NO"))
+    print("[WEBHOOK] scriptActive: " .. tostring(scriptActive))
+    print("[WEBHOOK] httpLib available: " .. tostring(httpLib ~= nil))
+    
     -- Don't process if script is closed
     if not scriptActive then
+        print("✗ Script not active, skipping webhook")
         return
     end
     
@@ -863,26 +870,9 @@ local function connectToEvents()
                                         print(">>> SPECIAL PET DETECTED! <<<")
                                     end
                                     
-                                    -- Debug: Check GUI state before sending webhook
-                                    print("[DEBUG] Before webhook - GUI exists:", g ~= nil)
-                                    if g then
-                                        print("[DEBUG] GUI Parent:", g.Parent)
-                                        print("[DEBUG] GUI Enabled:", g.Enabled)
-                                        print("[DEBUG] Main Frame Visible:", f and f.Visible)
-                                    end
-                                    
                                     -- Send webhook only (no in-game notifications)
                                     -- Pass the pet object so we can calculate probability
                                     sendDiscordNotification(petName, shiny, mythic, eggName, rarity, pet)
-                                    
-                                    -- Debug: Check GUI state after sending webhook
-                                    task.wait(0.1)
-                                    print("[DEBUG] After webhook - GUI exists:", g ~= nil)
-                                    if g then
-                                        print("[DEBUG] GUI Parent:", g.Parent)
-                                        print("[DEBUG] GUI Enabled:", g.Enabled)
-                                        print("[DEBUG] Main Frame Visible:", f and f.Visible)
-                                    end
                                 end
                             end
                         end
