@@ -32,6 +32,8 @@ local DETECT_LEGENDARIES = true -- Set to true to also detect Legendary pets (fo
 -- Special Pets (pets that should receive special notifications)
 -- Add pet names here (case insensitive, supports spaces)
 local SPECIAL_PETS = {
+    "Neon Elemental",
+    "Inferno Dragon",
     "Morning Star",
     "Christmas Robot",
     "Rumblecon God",
@@ -811,62 +813,82 @@ local function connectToEvents()
     
     local success, err = pcall(function()
         hatchEventConnection = Remote.Event("HatchEgg"):Connect(function(hatchedTable)
-            -- Don't process if script is closed
-            if not scriptActive then
-                return
-            end
-            
-            -- Optimized: Removed verbose prints that fire on every hatch
-            if type(hatchedTable) == "table" and hatchedTable.Pets then
-                local eggName = hatchedTable.Name
+            -- Wrap entire handler in pcall to prevent errors from breaking the connection
+            pcall(function()
+                -- Don't process if script is closed
+                if not scriptActive then
+                    return
+                end
                 
-                for i = 1, 20 do
-                    local petData = hatchedTable.Pets[i]
-                    if not petData then break end
+                -- Optimized: Removed verbose prints that fire on every hatch
+                if type(hatchedTable) == "table" and hatchedTable.Pets then
+                    local eggName = hatchedTable.Name
                     
-                    if type(petData) == "table" and petData.Pet then
-                        local pet = petData.Pet
-                        local petName = pet.Name
-                        local shiny = pet.Shiny == true
-                        local mythic = pet.Mythic == true
+                    for i = 1, 20 do
+                        local petData = hatchedTable.Pets[i]
+                        if not petData then break end
                         
-                        if petName and ItemUtil then
-                            local rarity = ItemUtil:GetRarity(pet)
+                        if type(petData) == "table" and petData.Pet then
+                            local pet = petData.Pet
+                            local petName = pet.Name
+                            local shiny = pet.Shiny == true
+                            local mythic = pet.Mythic == true
                             
-                            -- Check if this is a special pet (regardless of rarity)
-                            local isSpecial = isSpecialPet(petName)
-                            
-                            -- Check if Secret
-                            local isSecret = rarity == "Secret"
-                            
-                            -- Check if Legendary (only if flag is enabled)
-                            -- If DETECT_LEGENDARIES is false, isLegendary will always be false
-                            local isLegendary = false
-                            if DETECT_LEGENDARIES then
-                                isLegendary = (rarity == "Legendary")
-                            end
-                            
-                            -- Send notification if:
-                            -- 1. It's a Secret pet, OR
-                            -- 2. It's a Legendary pet (only if DETECT_LEGENDARIES is true), OR
-                            -- 3. It's a special pet (regardless of rarity)
-                            if isSecret or isLegendary or isSpecial then
-                                if isSecret then
-                                    print(">>> SECRET DETECTED! <<<")
-                                elseif isLegendary then
-                                    print(">>> LEGENDARY DETECTED! <<<")
-                                elseif isSpecial then
-                                    print(">>> SPECIAL PET DETECTED! <<<")
+                            if petName and ItemUtil then
+                                local rarity = ItemUtil:GetRarity(pet)
+                                
+                                -- Check if this is a special pet (regardless of rarity)
+                                local isSpecial = isSpecialPet(petName)
+                                
+                                -- Check if Secret
+                                local isSecret = rarity == "Secret"
+                                
+                                -- Check if Legendary (only if flag is enabled)
+                                -- If DETECT_LEGENDARIES is false, isLegendary will always be false
+                                local isLegendary = false
+                                if DETECT_LEGENDARIES then
+                                    isLegendary = (rarity == "Legendary")
                                 end
                                 
-                                -- Send webhook only (no in-game notifications)
-                                -- Pass the pet object so we can calculate probability
-                                sendDiscordNotification(petName, shiny, mythic, eggName, rarity, pet)
+                                -- Send notification if:
+                                -- 1. It's a Secret pet, OR
+                                -- 2. It's a Legendary pet (only if DETECT_LEGENDARIES is true), OR
+                                -- 3. It's a special pet (regardless of rarity)
+                                if isSecret or isLegendary or isSpecial then
+                                    if isSecret then
+                                        print(">>> SECRET DETECTED! <<<")
+                                    elseif isLegendary then
+                                        print(">>> LEGENDARY DETECTED! <<<")
+                                    elseif isSpecial then
+                                        print(">>> SPECIAL PET DETECTED! <<<")
+                                    end
+                                    
+                                    -- Debug: Check GUI state before sending webhook
+                                    print("[DEBUG] Before webhook - GUI exists:", g ~= nil)
+                                    if g then
+                                        print("[DEBUG] GUI Parent:", g.Parent)
+                                        print("[DEBUG] GUI Enabled:", g.Enabled)
+                                        print("[DEBUG] Main Frame Visible:", f and f.Visible)
+                                    end
+                                    
+                                    -- Send webhook only (no in-game notifications)
+                                    -- Pass the pet object so we can calculate probability
+                                    sendDiscordNotification(petName, shiny, mythic, eggName, rarity, pet)
+                                    
+                                    -- Debug: Check GUI state after sending webhook
+                                    task.wait(0.1)
+                                    print("[DEBUG] After webhook - GUI exists:", g ~= nil)
+                                    if g then
+                                        print("[DEBUG] GUI Parent:", g.Parent)
+                                        print("[DEBUG] GUI Enabled:", g.Enabled)
+                                        print("[DEBUG] Main Frame Visible:", f and f.Visible)
+                                    end
+                                end
                             end
                         end
                     end
                 end
-            end
+            end)
         end)
     end)
     
@@ -886,6 +908,8 @@ connectToEvents()
 -- GUI
 local g = Instance.new("ScreenGui")
 g.Name = "BubblegumAutoHatch"
+g.ResetOnSpawn = false  -- Prevent GUI from being destroyed on character reset
+g.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 g.Parent = p.PlayerGui
 
 -- Main frame
@@ -1175,3 +1199,11 @@ end)
 
 print("✓ GUI created")
 print("Ready! Click 'Auto Hatch' to start hatching")
+
+-- Monitor GUI to detect if it gets destroyed unexpectedly
+g.AncestryChanged:Connect(function(child, parent)
+    if not parent and scriptActive then
+        warn("WARNING: GUI was destroyed or removed! This might be caused by a game update or character reset.")
+        warn("Parent changed to: " .. tostring(parent))
+    end
+end)
