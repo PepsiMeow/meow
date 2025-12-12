@@ -16,8 +16,7 @@ local DETECT_LEGENDARIES = false -- Set to true to also detect Legendary pets (f
 local SPECIAL_PETS = {
     "Morning Star",
     "Christmas Robot",
-    "Rumblecon God",
-    "Leviathan",
+    "The Leviathan",
     "Sylently's Pet"
     -- Add more pet names here as needed
 }
