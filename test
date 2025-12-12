@@ -8,25 +8,7 @@ local VIM = game:GetService("VirtualInputManager")
 local HttpService = game:GetService("HttpService")
 local p = P.LocalPlayer
 
-print("========================================")
-print("BUBBLEGUM AUTO HATCH & NOTIFIER")
-print("Version: 2.0")
-print("DETECT_LEGENDARIES: " .. tostring(DETECT_LEGENDARIES))
-print("========================================")
-
--- Load required modules
-local Remote = nil
-local ItemUtil = nil
-local PetsData = nil
-local PetUtil = nil
-local FormatCommas = nil
-
--- Settings
-local autoHatchEnabled = false
-local webhookURL = ""
-local discordUserID = ""
-
--- Detection Settings
+-- Detection Settings (MUST be defined before print statements)
 local DETECT_LEGENDARIES = true -- Set to true to also detect Legendary pets (for testing)
 
 -- Special Pets (pets that should receive special notifications)
@@ -47,6 +29,24 @@ local SPECIAL_PETS_LOWER = {}
 for _, petName in ipairs(SPECIAL_PETS) do
     SPECIAL_PETS_LOWER[string.lower(petName)] = true
 end
+
+print("========================================")
+print("BUBBLEGUM AUTO HATCH & NOTIFIER")
+print("Version: 2.0")
+print("DETECT_LEGENDARIES: " .. tostring(DETECT_LEGENDARIES))
+print("========================================")
+
+-- Load required modules
+local Remote = nil
+local ItemUtil = nil
+local PetsData = nil
+local PetUtil = nil
+local FormatCommas = nil
+
+-- Settings
+local autoHatchEnabled = false
+local webhookURL = ""
+local discordUserID = ""
 
 -- Settings file path
 local SETTINGS_FILE = "bubblegum_settings.json"
@@ -166,15 +166,24 @@ local httpLib = nil
 local httpLibName = nil
 if request then
     httpLib = function(url, method, headers, body)
+        print("[HTTP] Attempting request to: " .. string.sub(url, 1, 50) .. "...")
+        print("[HTTP] Method: " .. method)
         local success, res, err = pcall(function()
             return request({Url=url, Method=method, Headers=headers or {}, Body=body})
         end)
+        print("[HTTP] pcall success: " .. tostring(success))
+        print("[HTTP] res exists: " .. tostring(res ~= nil))
+        if not success then
+            print("[HTTP] pcall error: " .. tostring(err))
+        end
         if success and res then
             local status = res.StatusCode or (res.Success and 200 or (res.success and 200 or 0))
             local body = res.Body or res.body or ""
             local ok = res.Success or res.success or status == 200 or status == 204
+            print("[HTTP] Status: " .. tostring(status) .. ", OK: " .. tostring(ok))
             return ok, body, status
         end
+        print("[HTTP] Returning failure - Request exception")
         return false, err or "Request exception", 0
     end
     httpLibName = "request"
