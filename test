@@ -9,7 +9,7 @@ local HttpService = game:GetService("HttpService")
 local p = P.LocalPlayer
 
 -- Detection Settings (MUST be defined before print statements)
-local DETECT_LEGENDARIES = false -- Set to true to also detect Legendary pets (for testing)
+local DETECT_LEGENDARIES = true -- Set to true to also detect Legendary pets (for testing)
 
 -- Special Pets (pets that should receive special notifications)
 -- Add pet names here (case insensitive, supports spaces)
