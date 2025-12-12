@@ -166,24 +166,15 @@ local httpLib = nil
 local httpLibName = nil
 if request then
     httpLib = function(url, method, headers, body)
-        print("[HTTP] Attempting request to: " .. string.sub(url, 1, 50) .. "...")
-        print("[HTTP] Method: " .. method)
         local success, res, err = pcall(function()
             return request({Url=url, Method=method, Headers=headers or {}, Body=body})
         end)
-        print("[HTTP] pcall success: " .. tostring(success))
-        print("[HTTP] res exists: " .. tostring(res ~= nil))
-        if not success then
-            print("[HTTP] pcall error: " .. tostring(err))
-        end
         if success and res then
             local status = res.StatusCode or (res.Success and 200 or (res.success and 200 or 0))
             local body = res.Body or res.body or ""
             local ok = res.Success or res.success or status == 200 or status == 204
-            print("[HTTP] Status: " .. tostring(status) .. ", OK: " .. tostring(ok))
             return ok, body, status
         end
-        print("[HTTP] Returning failure - Request exception")
         return false, err or "Request exception", 0
     end
     httpLibName = "request"
@@ -711,25 +702,18 @@ end
 
 -- Public function to queue webhook (handles rate limiting)
 local function sendDiscordNotification(petName, shiny, mythic, eggName, rarity, pet)
-    print("[WEBHOOK] sendDiscordNotification called for: " .. tostring(petName))
-    print("[WEBHOOK] Webhook URL set: " .. (webhookURL ~= "" and "YES (" .. string.sub(webhookURL, 1, 40) .. "...)" or "NO"))
-    print("[WEBHOOK] Discord User ID set: " .. (discordUserID ~= "" and "YES (" .. discordUserID .. ")" or "NO"))
-    print("[WEBHOOK] scriptActive: " .. tostring(scriptActive))
-    print("[WEBHOOK] httpLib available: " .. tostring(httpLib ~= nil))
-    
     -- Don't process if script is closed
     if not scriptActive then
-        print("✗ Script not active, skipping webhook")
         return
     end
     
     if webhookURL == "" then
-        print("✗ Webhook URL not set! Cannot send notification.")
+        print("✗ Webhook URL not set")
         return
     end
     
     if not httpLib then
-        print("✗ HTTP library not available! Cannot send notification.")
+        print("✗ HTTP library not available")
         return
     end
     
