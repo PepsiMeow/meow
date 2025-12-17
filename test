@@ -1286,6 +1286,31 @@ userIDInput.Font = Enum.Font.Gotham
 userIDInput.BorderSizePixel = 0
 userIDInput.Parent = hatchingContent
 
+-- X button on main GUI (top right of frame) - hides GUI
+local hideXBtn = Instance.new("TextButton")
+hideXBtn.Size = UDim2.new(0, 30, 0, 30)
+hideXBtn.Position = UDim2.new(1, -35, 0, 5)
+hideXBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+hideXBtn.Text = "X"
+hideXBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+hideXBtn.TextSize = 18
+hideXBtn.Font = Enum.Font.GothamBold
+hideXBtn.BorderSizePixel = 0
+hideXBtn.ZIndex = 2
+hideXBtn.Parent = f
+
+-- Toggle button (top right of screen - always visible)
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Size = UDim2.new(0, 50, 0, 50)
+toggleBtn.Position = UDim2.new(1, -60, 0, 10)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(60, 120, 200)
+toggleBtn.Text = "GUI"
+toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleBtn.TextSize = 12
+toggleBtn.Font = Enum.Font.GothamBold
+toggleBtn.BorderSizePixel = 0
+toggleBtn.Parent = g
+
 -- Extra content title bar
 local extraTitle = Instance.new("TextLabel")
 extraTitle.Size = UDim2.new(1, 0, 0, 40)
@@ -1298,90 +1323,105 @@ extraTitle.Font = Enum.Font.GothamBold
 extraTitle.BorderSizePixel = 0
 extraTitle.Parent = extraContent
 
--- Rift detection button
+-- 2x2 Button grid in Extra tab
+-- Row 1: Rift Detection (left) and Hourly Status (right)
+-- Row 2: Player Tracking (left) and Close Script (right)
+
+-- Rift detection button (top-left)
 local riftBtn = Instance.new("TextButton")
-riftBtn.Size = UDim2.new(0, 330, 0, 35)
-riftBtn.Position = UDim2.new(0, 15, 0, 55)
+riftBtn.Size = UDim2.new(0, 155, 0, 30)
+riftBtn.Position = UDim2.new(0, 15, 0, 50)
 riftBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-riftBtn.Text = "Christmas Rift Detection: OFF"
+riftBtn.Text = "Rift Detection: OFF"
 riftBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-riftBtn.TextSize = 12
+riftBtn.TextSize = 11
 riftBtn.Font = Enum.Font.GothamBold
 riftBtn.BorderSizePixel = 0
 riftBtn.Parent = extraContent
 
 local riftDesc = Instance.new("TextLabel")
-riftDesc.Size = UDim2.new(0, 330, 0, 20)
-riftDesc.Position = UDim2.new(0, 15, 0, 95)
+riftDesc.Size = UDim2.new(0, 155, 0, 30)
+riftDesc.Position = UDim2.new(0, 15, 0, 82)
 riftDesc.BackgroundTransparency = 1
 riftDesc.Text = "Detects Christmas Chest Rifts and pings you"
 riftDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
-riftDesc.TextSize = 9
+riftDesc.TextSize = 8
 riftDesc.Font = Enum.Font.Gotham
 riftDesc.TextXAlignment = Enum.TextXAlignment.Left
 riftDesc.TextWrapped = true
 riftDesc.Parent = extraContent
 
--- Hourly status button
+-- Hourly status button (top-right)
 local hourlyBtn = Instance.new("TextButton")
-hourlyBtn.Size = UDim2.new(0, 330, 0, 35)
-hourlyBtn.Position = UDim2.new(0, 15, 0, 125)
+hourlyBtn.Size = UDim2.new(0, 155, 0, 30)
+hourlyBtn.Position = UDim2.new(0, 180, 0, 50)
 hourlyBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
 hourlyBtn.Text = "Hourly Status: OFF"
 hourlyBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-hourlyBtn.TextSize = 12
+hourlyBtn.TextSize = 11
 hourlyBtn.Font = Enum.Font.GothamBold
 hourlyBtn.BorderSizePixel = 0
 hourlyBtn.Parent = extraContent
 
 local hourlyDesc = Instance.new("TextLabel")
-hourlyDesc.Size = UDim2.new(0, 330, 0, 20)
-hourlyDesc.Position = UDim2.new(0, 15, 0, 165)
+hourlyDesc.Size = UDim2.new(0, 155, 0, 30)
+hourlyDesc.Position = UDim2.new(0, 180, 0, 82)
 hourlyDesc.BackgroundTransparency = 1
-hourlyDesc.Text = "Sends status update every hour with runtime"
+hourlyDesc.Text = "Sends status every hour with runtime"
 hourlyDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
-hourlyDesc.TextSize = 9
+hourlyDesc.TextSize = 8
 hourlyDesc.Font = Enum.Font.Gotham
 hourlyDesc.TextXAlignment = Enum.TextXAlignment.Left
 hourlyDesc.TextWrapped = true
 hourlyDesc.Parent = extraContent
 
--- Player tracking button
+-- Player tracking button (bottom-left)
 local playerBtn = Instance.new("TextButton")
-playerBtn.Size = UDim2.new(0, 330, 0, 35)
-playerBtn.Position = UDim2.new(0, 15, 0, 195)
+playerBtn.Size = UDim2.new(0, 155, 0, 30)
+playerBtn.Position = UDim2.new(0, 15, 0, 125)
 playerBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-playerBtn.Text = "Player Join/Leave: OFF"
+playerBtn.Text = "Player Track: OFF"
 playerBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-playerBtn.TextSize = 12
+playerBtn.TextSize = 11
 playerBtn.Font = Enum.Font.GothamBold
 playerBtn.BorderSizePixel = 0
 playerBtn.Parent = extraContent
 
 local playerDesc = Instance.new("TextLabel")
-playerDesc.Size = UDim2.new(0, 330, 0, 20)
-playerDesc.Position = UDim2.new(0, 15, 1, -10)
+playerDesc.Size = UDim2.new(0, 155, 0, 30)
+playerDesc.Position = UDim2.new(0, 15, 0, 157)
 playerDesc.BackgroundTransparency = 1
-playerDesc.Text = "Notifies when players join or leave the server"
+playerDesc.Text = "Notifies when players join or leave"
 playerDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
-playerDesc.TextSize = 9
+playerDesc.TextSize = 8
 playerDesc.Font = Enum.Font.Gotham
 playerDesc.TextXAlignment = Enum.TextXAlignment.Left
 playerDesc.TextWrapped = true
 playerDesc.Parent = extraContent
 
--- Close button (top right of screen - always visible)
-local closeBtn = Instance.new("TextButton")
-closeBtn.Size = UDim2.new(0, 40, 0, 40)
-closeBtn.Position = UDim2.new(1, 10, 0, -40)
-closeBtn.AnchorPoint = Vector2.new(1, 0)
-closeBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
-closeBtn.Text = "X"
-closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-closeBtn.TextSize = 24
-closeBtn.Font = Enum.Font.GothamBold
-closeBtn.BorderSizePixel = 0
-closeBtn.Parent = g
+-- Close Script button (bottom-right)
+local closeScriptBtn = Instance.new("TextButton")
+closeScriptBtn.Size = UDim2.new(0, 155, 0, 30)
+closeScriptBtn.Position = UDim2.new(0, 180, 0, 125)
+closeScriptBtn.BackgroundColor3 = Color3.fromRGB(80, 40, 40)
+closeScriptBtn.Text = "Close Script"
+closeScriptBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeScriptBtn.TextSize = 11
+closeScriptBtn.Font = Enum.Font.GothamBold
+closeScriptBtn.BorderSizePixel = 0
+closeScriptBtn.Parent = extraContent
+
+local closeScriptDesc = Instance.new("TextLabel")
+closeScriptDesc.Size = UDim2.new(0, 155, 0, 30)
+closeScriptDesc.Position = UDim2.new(0, 180, 0, 157)
+closeScriptDesc.BackgroundTransparency = 1
+closeScriptDesc.Text = "Stop all script functionality"
+closeScriptDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
+closeScriptDesc.TextSize = 8
+closeScriptDesc.Font = Enum.Font.Gotham
+closeScriptDesc.TextXAlignment = Enum.TextXAlignment.Left
+closeScriptDesc.TextWrapped = true
+closeScriptDesc.Parent = extraContent
 
 -- Confirmation dialog
 local confirmFrame = Instance.new("Frame")
@@ -1490,10 +1530,10 @@ riftBtn.Activated:Connect(function()
     riftDetectionEnabled = not riftDetectionEnabled
     
     if riftDetectionEnabled then
-        riftBtn.Text = "Christmas Rift Detection: ON"
+        riftBtn.Text = "Rift Detection: ON"
         riftBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
     else
-        riftBtn.Text = "Christmas Rift Detection: OFF"
+        riftBtn.Text = "Rift Detection: OFF"
         riftBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
     end
 end)
@@ -1520,11 +1560,35 @@ playerBtn.Activated:Connect(function()
     playerTrackingEnabled = not playerTrackingEnabled
     
     if playerTrackingEnabled then
-        playerBtn.Text = "Player Join/Leave: ON"
+        playerBtn.Text = "Player Track: ON"
         playerBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
     else
-        playerBtn.Text = "Player Join/Leave: OFF"
+        playerBtn.Text = "Player Track: OFF"
         playerBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    end
+end)
+
+-- Close Script button - opens confirmation dialog
+closeScriptBtn.Activated:Connect(function()
+    confirmFrame.Visible = true
+end)
+
+-- Hide X button - hides main GUI
+hideXBtn.Activated:Connect(function()
+    f.Visible = false
+    toggleBtn.Text = ">>>"
+    toggleBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+end)
+
+-- Toggle button - shows/hides main GUI
+toggleBtn.Activated:Connect(function()
+    f.Visible = not f.Visible
+    if f.Visible then
+        toggleBtn.Text = "GUI"
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(60, 120, 200)
+    else
+        toggleBtn.Text = ">>>"
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
     end
 end)
 
@@ -1542,11 +1606,6 @@ userIDInput.FocusLost:Connect(function(enterPressed)
     discordUserID = id
     print("Discord User ID saved: " .. (id ~= "" and id or "EMPTY"))
     saveSettings()
-end)
-
--- Close button - opens confirmation dialog
-closeBtn.Activated:Connect(function()
-    confirmFrame.Visible = true
 end)
 
 -- Yes button - closes everything
