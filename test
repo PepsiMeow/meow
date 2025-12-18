@@ -50,7 +50,7 @@ local discordUserID = ""
 local riftDetectionEnabled = false
 local hourlyStatusEnabled = false
 local playerTrackingEnabled = false
-local legendaryDetectionEnabled = true -- Default to true (replaces DETECT_LEGENDARIES flag)
+local legendaryDetectionEnabled = false -- Default to OFF (for testing)
 
 -- Script start time for runtime calculation
 local scriptStartTime = os.time()
@@ -430,9 +430,30 @@ local function getTotalEggsHatched()
         local success, data = pcall(function()
             return LocalData:GetData()
         end)
-        if success and data and data.Stats and data.Stats.TotalEggsOpened then
-            return data.Stats.TotalEggsOpened
+        if success and data and data.Stats then
+            -- Try multiple possible field names
+            local hatches = data.Stats.TotalEggsOpened 
+                or data.Stats.Hatches 
+                or data.Stats["🥚Hatches"]
+                or data.Stats["🥚 Hatches"]
+            
+            if hatches then
+                print("✓ Eggs hatched count found: " .. tostring(hatches))
+                return hatches
+            else
+                -- Debug: print available Stats fields
+                print("⚠ Could not find eggs hatched count. Available Stats fields:")
+                for key, value in pairs(data.Stats) do
+                    if type(value) == "number" then
+                        print("  - " .. tostring(key) .. ": " .. tostring(value))
+                    end
+                end
+            end
+        else
+            print("⚠ LocalData.Stats not available")
         end
+    else
+        print("⚠ LocalData module not loaded")
     end
     return nil
 end
@@ -1383,6 +1404,7 @@ extraTitle.Parent = extraContent
 -- Row 1: Rift Detection (left) and Hourly Status (right)
 -- Row 2: Player Tracking (left) and Close Script (right)
 
+-- Row 1: Rift Detection (left) and Hourly Status (right)
 -- Rift detection button (top-left)
 local riftBtn = Instance.new("TextButton")
 riftBtn.Size = UDim2.new(0, 155, 0, 30)
@@ -1431,7 +1453,8 @@ hourlyDesc.TextXAlignment = Enum.TextXAlignment.Left
 hourlyDesc.TextWrapped = true
 hourlyDesc.Parent = extraContent
 
--- Player tracking button (bottom-left)
+-- Row 2: Player Tracking (left) and Legendary Detection (right)
+-- Player tracking button (middle-left)
 local playerBtn = Instance.new("TextButton")
 playerBtn.Size = UDim2.new(0, 155, 0, 30)
 playerBtn.Position = UDim2.new(0, 15, 0, 125)
@@ -1455,21 +1478,21 @@ playerDesc.TextXAlignment = Enum.TextXAlignment.Left
 playerDesc.TextWrapped = true
 playerDesc.Parent = extraContent
 
--- Legendary Detection button (bottom-right)
+-- Legendary Detection button (middle-right)
 local legendaryBtn = Instance.new("TextButton")
-legendaryBtn.Size = UDim2.new(0, 155, 0, 28)
-legendaryBtn.Position = UDim2.new(0, 180, 0, 118)
-legendaryBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50) -- Start as ON (default true)
-legendaryBtn.Text = "Legendary: ON"
+legendaryBtn.Size = UDim2.new(0, 155, 0, 30)
+legendaryBtn.Position = UDim2.new(0, 180, 0, 125)
+legendaryBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60) -- Start as OFF (default)
+legendaryBtn.Text = "Legendary Detection: OFF"
 legendaryBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-legendaryBtn.TextSize = 11
+legendaryBtn.TextSize = 10
 legendaryBtn.Font = Enum.Font.GothamBold
 legendaryBtn.BorderSizePixel = 0
 legendaryBtn.Parent = extraContent
 
 local legendaryDesc = Instance.new("TextLabel")
-legendaryDesc.Size = UDim2.new(0, 155, 0, 25)
-legendaryDesc.Position = UDim2.new(0, 180, 0, 148)
+legendaryDesc.Size = UDim2.new(0, 155, 0, 30)
+legendaryDesc.Position = UDim2.new(0, 180, 0, 157)
 legendaryDesc.BackgroundTransparency = 1
 legendaryDesc.Text = "Toggle legendary detection (testing)"
 legendaryDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
@@ -1660,10 +1683,10 @@ legendaryBtn.Activated:Connect(function()
     legendaryDetectionEnabled = not legendaryDetectionEnabled
     
     if legendaryDetectionEnabled then
-        legendaryBtn.Text = "Legendary: ON"
+        legendaryBtn.Text = "Legendary Detection: ON"
         legendaryBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
     else
-        legendaryBtn.Text = "Legendary: OFF"
+        legendaryBtn.Text = "Legendary Detection: OFF"
         legendaryBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
     end
 end)
