@@ -1455,10 +1455,34 @@ playerDesc.TextXAlignment = Enum.TextXAlignment.Left
 playerDesc.TextWrapped = true
 playerDesc.Parent = extraContent
 
--- Close Script button (bottom-right)
+-- Legendary Detection button (bottom-right)
+local legendaryBtn = Instance.new("TextButton")
+legendaryBtn.Size = UDim2.new(0, 155, 0, 28)
+legendaryBtn.Position = UDim2.new(0, 180, 0, 118)
+legendaryBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50) -- Start as ON (default true)
+legendaryBtn.Text = "Legendary: ON"
+legendaryBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+legendaryBtn.TextSize = 11
+legendaryBtn.Font = Enum.Font.GothamBold
+legendaryBtn.BorderSizePixel = 0
+legendaryBtn.Parent = extraContent
+
+local legendaryDesc = Instance.new("TextLabel")
+legendaryDesc.Size = UDim2.new(0, 155, 0, 25)
+legendaryDesc.Position = UDim2.new(0, 180, 0, 148)
+legendaryDesc.BackgroundTransparency = 1
+legendaryDesc.Text = "Toggle legendary detection (testing)"
+legendaryDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
+legendaryDesc.TextSize = 8
+legendaryDesc.Font = Enum.Font.Gotham
+legendaryDesc.TextXAlignment = Enum.TextXAlignment.Left
+legendaryDesc.TextWrapped = true
+legendaryDesc.Parent = extraContent
+
+-- Close Script button (bottom, full width)
 local closeScriptBtn = Instance.new("TextButton")
-closeScriptBtn.Size = UDim2.new(0, 155, 0, 28)
-closeScriptBtn.Position = UDim2.new(0, 180, 0, 118)
+closeScriptBtn.Size = UDim2.new(0, 320, 0, 28)
+closeScriptBtn.Position = UDim2.new(0, 15, 0, 180)
 closeScriptBtn.BackgroundColor3 = Color3.fromRGB(80, 40, 40)
 closeScriptBtn.Text = "Close Script"
 closeScriptBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -1468,8 +1492,8 @@ closeScriptBtn.BorderSizePixel = 0
 closeScriptBtn.Parent = extraContent
 
 local closeScriptDesc = Instance.new("TextLabel")
-closeScriptDesc.Size = UDim2.new(0, 155, 0, 25)
-closeScriptDesc.Position = UDim2.new(0, 180, 0, 148)
+closeScriptDesc.Size = UDim2.new(0, 320, 0, 25)
+closeScriptDesc.Position = UDim2.new(0, 15, 0, 210)
 closeScriptDesc.BackgroundTransparency = 1
 closeScriptDesc.Text = "Stop all script functionality"
 closeScriptDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
@@ -1478,30 +1502,6 @@ closeScriptDesc.Font = Enum.Font.Gotham
 closeScriptDesc.TextXAlignment = Enum.TextXAlignment.Left
 closeScriptDesc.TextWrapped = true
 closeScriptDesc.Parent = extraContent
-
--- Legendary Detection button (bottom center, spanning both columns)
-local legendaryBtn = Instance.new("TextButton")
-legendaryBtn.Size = UDim2.new(0, 320, 0, 28)
-legendaryBtn.Position = UDim2.new(0, 15, 0, 180)
-legendaryBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50) -- Start as ON (default true)
-legendaryBtn.Text = "Legendary Detection: ON (Testing)"
-legendaryBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-legendaryBtn.TextSize = 11
-legendaryBtn.Font = Enum.Font.GothamBold
-legendaryBtn.BorderSizePixel = 0
-legendaryBtn.Parent = extraContent
-
-local legendaryDesc = Instance.new("TextLabel")
-legendaryDesc.Size = UDim2.new(0, 320, 0, 25)
-legendaryDesc.Position = UDim2.new(0, 15, 0, 210)
-legendaryDesc.BackgroundTransparency = 1
-legendaryDesc.Text = "Toggle legendary pet detection (for testing purposes)"
-legendaryDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
-legendaryDesc.TextSize = 8
-legendaryDesc.Font = Enum.Font.Gotham
-legendaryDesc.TextXAlignment = Enum.TextXAlignment.Left
-legendaryDesc.TextWrapped = true
-legendaryDesc.Parent = extraContent
 
 -- Confirmation dialog
 local confirmFrame = Instance.new("Frame")
@@ -1660,10 +1660,10 @@ legendaryBtn.Activated:Connect(function()
     legendaryDetectionEnabled = not legendaryDetectionEnabled
     
     if legendaryDetectionEnabled then
-        legendaryBtn.Text = "Legendary Detection: ON (Testing)"
+        legendaryBtn.Text = "Legendary: ON"
         legendaryBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
     else
-        legendaryBtn.Text = "Legendary Detection: OFF"
+        legendaryBtn.Text = "Legendary: OFF"
         legendaryBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
     end
 end)
