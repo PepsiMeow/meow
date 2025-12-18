@@ -426,36 +426,29 @@ end
 
 -- Helper function to get total eggs hatched count
 local function getTotalEggsHatched()
-    if LocalData then
-        local success, data = pcall(function()
-            return LocalData:GetData()
-        end)
-        if success and data and data.Stats then
-            -- Try multiple possible field names
-            local hatches = data.Stats.TotalEggsOpened 
-                or data.Stats.Hatches 
-                or data.Stats["🥚Hatches"]
-                or data.Stats["🥚 Hatches"]
-            
-            if hatches then
-                print("✓ Eggs hatched count found: " .. tostring(hatches))
-                return hatches
-            else
-                -- Debug: print available Stats fields
-                print("⚠ Could not find eggs hatched count. Available Stats fields:")
-                for key, value in pairs(data.Stats) do
-                    if type(value) == "number" then
-                        print("  - " .. tostring(key) .. ": " .. tostring(value))
-                    end
-                end
-            end
-        else
-            print("⚠ LocalData.Stats not available")
-        end
-    else
-        print("⚠ LocalData module not loaded")
+    if not LocalData then
+        return nil
     end
-    return nil
+    
+    local success, data = pcall(function()
+        return LocalData:Get() -- Use :Get() not :GetData()
+    end)
+    
+    if not success or not data then
+        return nil
+    end
+    
+    if not data.Stats then
+        return nil
+    end
+    
+    -- Try multiple possible field names
+    local hatches = data.Stats.Hatches 
+        or data.Stats.TotalEggsOpened 
+        or data.Stats["🥚Hatches"]
+        or data.Stats["🥚 Hatches"]
+    
+    return hatches
 end
 
 -- Function to send special webhook (with infinity colors and message)
@@ -1407,7 +1400,7 @@ extraTitle.Parent = extraContent
 -- Row 1: Rift Detection (left) and Hourly Status (right)
 -- Rift detection button (top-left)
 local riftBtn = Instance.new("TextButton")
-riftBtn.Size = UDim2.new(0, 155, 0, 30)
+riftBtn.Size = UDim2.new(0, 155, 0, 28)
 riftBtn.Position = UDim2.new(0, 15, 0, 50)
 riftBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
 riftBtn.Text = "Rift Detection: OFF"
@@ -1418,8 +1411,8 @@ riftBtn.BorderSizePixel = 0
 riftBtn.Parent = extraContent
 
 local riftDesc = Instance.new("TextLabel")
-riftDesc.Size = UDim2.new(0, 155, 0, 30)
-riftDesc.Position = UDim2.new(0, 15, 0, 82)
+riftDesc.Size = UDim2.new(0, 155, 0, 22)
+riftDesc.Position = UDim2.new(0, 15, 0, 80)
 riftDesc.BackgroundTransparency = 1
 riftDesc.Text = "Detects Christmas Chest Rifts and pings you"
 riftDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
@@ -1431,7 +1424,7 @@ riftDesc.Parent = extraContent
 
 -- Hourly status button (top-right)
 local hourlyBtn = Instance.new("TextButton")
-hourlyBtn.Size = UDim2.new(0, 155, 0, 30)
+hourlyBtn.Size = UDim2.new(0, 155, 0, 28)
 hourlyBtn.Position = UDim2.new(0, 180, 0, 50)
 hourlyBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
 hourlyBtn.Text = "Hourly Status: OFF"
@@ -1442,8 +1435,8 @@ hourlyBtn.BorderSizePixel = 0
 hourlyBtn.Parent = extraContent
 
 local hourlyDesc = Instance.new("TextLabel")
-hourlyDesc.Size = UDim2.new(0, 155, 0, 30)
-hourlyDesc.Position = UDim2.new(0, 180, 0, 82)
+hourlyDesc.Size = UDim2.new(0, 155, 0, 22)
+hourlyDesc.Position = UDim2.new(0, 180, 0, 80)
 hourlyDesc.BackgroundTransparency = 1
 hourlyDesc.Text = "Sends status every hour with runtime"
 hourlyDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
@@ -1456,8 +1449,8 @@ hourlyDesc.Parent = extraContent
 -- Row 2: Player Tracking (left) and Legendary Detection (right)
 -- Player tracking button (middle-left)
 local playerBtn = Instance.new("TextButton")
-playerBtn.Size = UDim2.new(0, 155, 0, 30)
-playerBtn.Position = UDim2.new(0, 15, 0, 125)
+playerBtn.Size = UDim2.new(0, 155, 0, 28)
+playerBtn.Position = UDim2.new(0, 15, 0, 110)
 playerBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
 playerBtn.Text = "Player Track: OFF"
 playerBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -1467,8 +1460,8 @@ playerBtn.BorderSizePixel = 0
 playerBtn.Parent = extraContent
 
 local playerDesc = Instance.new("TextLabel")
-playerDesc.Size = UDim2.new(0, 155, 0, 30)
-playerDesc.Position = UDim2.new(0, 15, 0, 157)
+playerDesc.Size = UDim2.new(0, 155, 0, 22)
+playerDesc.Position = UDim2.new(0, 15, 0, 140)
 playerDesc.BackgroundTransparency = 1
 playerDesc.Text = "Notifies when players join or leave"
 playerDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
@@ -1480,8 +1473,8 @@ playerDesc.Parent = extraContent
 
 -- Legendary Detection button (middle-right)
 local legendaryBtn = Instance.new("TextButton")
-legendaryBtn.Size = UDim2.new(0, 155, 0, 30)
-legendaryBtn.Position = UDim2.new(0, 180, 0, 125)
+legendaryBtn.Size = UDim2.new(0, 155, 0, 28)
+legendaryBtn.Position = UDim2.new(0, 180, 0, 110)
 legendaryBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60) -- Start as OFF (default)
 legendaryBtn.Text = "Legendary Detection: OFF"
 legendaryBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -1491,8 +1484,8 @@ legendaryBtn.BorderSizePixel = 0
 legendaryBtn.Parent = extraContent
 
 local legendaryDesc = Instance.new("TextLabel")
-legendaryDesc.Size = UDim2.new(0, 155, 0, 30)
-legendaryDesc.Position = UDim2.new(0, 180, 0, 157)
+legendaryDesc.Size = UDim2.new(0, 155, 0, 22)
+legendaryDesc.Position = UDim2.new(0, 180, 0, 140)
 legendaryDesc.BackgroundTransparency = 1
 legendaryDesc.Text = "Toggle legendary detection (testing)"
 legendaryDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
@@ -1505,7 +1498,7 @@ legendaryDesc.Parent = extraContent
 -- Close Script button (bottom, full width)
 local closeScriptBtn = Instance.new("TextButton")
 closeScriptBtn.Size = UDim2.new(0, 320, 0, 28)
-closeScriptBtn.Position = UDim2.new(0, 15, 0, 180)
+closeScriptBtn.Position = UDim2.new(0, 15, 0, 170)
 closeScriptBtn.BackgroundColor3 = Color3.fromRGB(80, 40, 40)
 closeScriptBtn.Text = "Close Script"
 closeScriptBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -1515,8 +1508,8 @@ closeScriptBtn.BorderSizePixel = 0
 closeScriptBtn.Parent = extraContent
 
 local closeScriptDesc = Instance.new("TextLabel")
-closeScriptDesc.Size = UDim2.new(0, 320, 0, 25)
-closeScriptDesc.Position = UDim2.new(0, 15, 0, 210)
+closeScriptDesc.Size = UDim2.new(0, 320, 0, 22)
+closeScriptDesc.Position = UDim2.new(0, 15, 0, 200)
 closeScriptDesc.BackgroundTransparency = 1
 closeScriptDesc.Text = "Stop all script functionality"
 closeScriptDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
