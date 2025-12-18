@@ -9,8 +9,7 @@ local HttpService = game:GetService("HttpService")
 local TextChatService = game:GetService("TextChatService")
 local p = P.LocalPlayer
 
--- Detection Settings (MUST be defined before print statements)
-local DETECT_LEGENDARIES = false -- Set to true to also detect Legendary pets (for testing)
+-- Detection Settings (moved to GUI toggle button in Extra tab)
 
 -- Special Pets (pets that should receive special notifications)
 -- Add pet names here (case insensitive, supports spaces)
@@ -34,7 +33,6 @@ end
 print("========================================")
 print("BUBBLEGUM AUTO HATCH & NOTIFIER")
 print("Version: 3.0")
-print("DETECT_LEGENDARIES: " .. tostring(DETECT_LEGENDARIES))
 print("========================================")
 
 -- Load required modules
@@ -43,6 +41,7 @@ local ItemUtil = nil
 local PetsData = nil
 local PetUtil = nil
 local FormatCommas = nil
+local LocalData = nil
 
 -- Settings
 local autoHatchEnabled = false
@@ -51,6 +50,7 @@ local discordUserID = ""
 local riftDetectionEnabled = false
 local hourlyStatusEnabled = false
 local playerTrackingEnabled = false
+local legendaryDetectionEnabled = true -- Default to true (replaces DETECT_LEGENDARIES flag)
 
 -- Script start time for runtime calculation
 local scriptStartTime = os.time()
@@ -160,6 +160,15 @@ local function loadModules()
     if success5 and formatCommas then
         FormatCommas = formatCommas
         print("✓ Loaded FormatCommas")
+    end
+    
+    -- Load LocalData for player stats
+    local success6, localData = pcall(function()
+        return require(RS.Client.Framework.Services.LocalData)
+    end)
+    if success6 and localData then
+        LocalData = localData
+        print("✓ Loaded LocalData")
     end
 end
 
@@ -415,6 +424,19 @@ local function sendDebugWebhook(message)
     end
 end
 
+-- Helper function to get total eggs hatched count
+local function getTotalEggsHatched()
+    if LocalData then
+        local success, data = pcall(function()
+            return LocalData:GetData()
+        end)
+        if success and data and data.Stats and data.Stats.TotalEggsOpened then
+            return data.Stats.TotalEggsOpened
+        end
+    end
+    return nil
+end
+
 -- Function to send special webhook (with infinity colors and message)
 local function sendSpecialDiscordNotificationInternal(petName, shiny, mythic, xl, eggName, rarity, pet, petImageUrl, isInfinity)
     if not httpLib or webhookURL == "" then 
@@ -423,6 +445,9 @@ local function sendSpecialDiscordNotificationInternal(petName, shiny, mythic, xl
     
     -- Get player name
     local playerName = p.Name or "Unknown Player"
+    
+    -- Get total eggs hatched
+    local eggsHatched = getTotalEggsHatched()
     
     -- Build pet name with prefix (XL goes AFTER shiny/mythic)
     local fullPetName = ""
@@ -517,6 +542,20 @@ local function sendSpecialDiscordNotificationInternal(petName, shiny, mythic, xl
         }
     end
     
+    -- Add footer with eggs hatched count (small text at bottom)
+    if eggsHatched then
+        local formattedCount = eggsHatched
+        if FormatCommas then
+            formattedCount = FormatCommas(eggsHatched)
+        else
+            -- Manual formatting
+            formattedCount = tostring(eggsHatched):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
+        end
+        embed.footer = {
+            text = "Eggs hatched: " .. formattedCount
+        }
+    end
+    
     -- Build payload
     local payload = {
         content = mention, -- Ping in content field
@@ -551,6 +590,9 @@ local function sendDiscordNotificationInternal(petName, shiny, mythic, xl, eggNa
     
     -- Get player name
     local playerName = p.Name or "Unknown Player"
+    
+    -- Get total eggs hatched
+    local eggsHatched = getTotalEggsHatched()
     
     -- Build pet name with prefix (XL goes AFTER shiny/mythic)
     local fullPetName = ""
@@ -647,6 +689,20 @@ local function sendDiscordNotificationInternal(petName, shiny, mythic, xl, eggNa
     if petImageUrl then
         embed.thumbnail = {
             url = petImageUrl
+        }
+    end
+    
+    -- Add footer with eggs hatched count (small text at bottom)
+    if eggsHatched then
+        local formattedCount = eggsHatched
+        if FormatCommas then
+            formattedCount = FormatCommas(eggsHatched)
+        else
+            -- Manual formatting
+            formattedCount = tostring(eggsHatched):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
+        end
+        embed.footer = {
+            text = "Eggs hatched: " .. formattedCount
         }
     end
     
@@ -961,9 +1017,9 @@ local function connectToEvents()
                                 -- Check if Secret
                                 local isSecret = rarity == "Secret"
                                 
-                                -- Check if Legendary (only if flag is enabled)
+                                -- Check if Legendary (only if toggle is enabled)
                                 local isLegendary = false
-                                if DETECT_LEGENDARIES then
+                                if legendaryDetectionEnabled then
                                     isLegendary = (rarity == "Legendary")
                                 end
                                 
@@ -1401,8 +1457,8 @@ playerDesc.Parent = extraContent
 
 -- Close Script button (bottom-right)
 local closeScriptBtn = Instance.new("TextButton")
-closeScriptBtn.Size = UDim2.new(0, 155, 0, 30)
-closeScriptBtn.Position = UDim2.new(0, 180, 0, 125)
+closeScriptBtn.Size = UDim2.new(0, 155, 0, 28)
+closeScriptBtn.Position = UDim2.new(0, 180, 0, 118)
 closeScriptBtn.BackgroundColor3 = Color3.fromRGB(80, 40, 40)
 closeScriptBtn.Text = "Close Script"
 closeScriptBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -1412,8 +1468,8 @@ closeScriptBtn.BorderSizePixel = 0
 closeScriptBtn.Parent = extraContent
 
 local closeScriptDesc = Instance.new("TextLabel")
-closeScriptDesc.Size = UDim2.new(0, 155, 0, 30)
-closeScriptDesc.Position = UDim2.new(0, 180, 0, 157)
+closeScriptDesc.Size = UDim2.new(0, 155, 0, 25)
+closeScriptDesc.Position = UDim2.new(0, 180, 0, 148)
 closeScriptDesc.BackgroundTransparency = 1
 closeScriptDesc.Text = "Stop all script functionality"
 closeScriptDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
@@ -1422,6 +1478,30 @@ closeScriptDesc.Font = Enum.Font.Gotham
 closeScriptDesc.TextXAlignment = Enum.TextXAlignment.Left
 closeScriptDesc.TextWrapped = true
 closeScriptDesc.Parent = extraContent
+
+-- Legendary Detection button (bottom center, spanning both columns)
+local legendaryBtn = Instance.new("TextButton")
+legendaryBtn.Size = UDim2.new(0, 320, 0, 28)
+legendaryBtn.Position = UDim2.new(0, 15, 0, 180)
+legendaryBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50) -- Start as ON (default true)
+legendaryBtn.Text = "Legendary Detection: ON (Testing)"
+legendaryBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+legendaryBtn.TextSize = 11
+legendaryBtn.Font = Enum.Font.GothamBold
+legendaryBtn.BorderSizePixel = 0
+legendaryBtn.Parent = extraContent
+
+local legendaryDesc = Instance.new("TextLabel")
+legendaryDesc.Size = UDim2.new(0, 320, 0, 25)
+legendaryDesc.Position = UDim2.new(0, 15, 0, 210)
+legendaryDesc.BackgroundTransparency = 1
+legendaryDesc.Text = "Toggle legendary pet detection (for testing purposes)"
+legendaryDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
+legendaryDesc.TextSize = 8
+legendaryDesc.Font = Enum.Font.Gotham
+legendaryDesc.TextXAlignment = Enum.TextXAlignment.Left
+legendaryDesc.TextWrapped = true
+legendaryDesc.Parent = extraContent
 
 -- Confirmation dialog
 local confirmFrame = Instance.new("Frame")
@@ -1571,6 +1651,21 @@ end)
 -- Close Script button - opens confirmation dialog
 closeScriptBtn.Activated:Connect(function()
     confirmFrame.Visible = true
+end)
+
+-- Legendary Detection toggle
+legendaryBtn.Activated:Connect(function()
+    if not scriptActive then return end
+    
+    legendaryDetectionEnabled = not legendaryDetectionEnabled
+    
+    if legendaryDetectionEnabled then
+        legendaryBtn.Text = "Legendary Detection: ON (Testing)"
+        legendaryBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+    else
+        legendaryBtn.Text = "Legendary Detection: OFF"
+        legendaryBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    end
 end)
 
 -- Hide X button - hides main GUI
