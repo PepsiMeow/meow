@@ -1412,13 +1412,14 @@ riftBtn.Parent = extraContent
 
 local riftDesc = Instance.new("TextLabel")
 riftDesc.Size = UDim2.new(0, 155, 0, 22)
-riftDesc.Position = UDim2.new(0, 15, 0, 80)
+riftDesc.Position = UDim2.new(0, 15, 0, 82)
 riftDesc.BackgroundTransparency = 1
 riftDesc.Text = "Detects Christmas Chest Rifts and pings you"
 riftDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
 riftDesc.TextSize = 8
 riftDesc.Font = Enum.Font.Gotham
 riftDesc.TextXAlignment = Enum.TextXAlignment.Left
+riftDesc.TextYAlignment = Enum.TextYAlignment.Top
 riftDesc.TextWrapped = true
 riftDesc.Parent = extraContent
 
@@ -1436,13 +1437,14 @@ hourlyBtn.Parent = extraContent
 
 local hourlyDesc = Instance.new("TextLabel")
 hourlyDesc.Size = UDim2.new(0, 155, 0, 22)
-hourlyDesc.Position = UDim2.new(0, 180, 0, 80)
+hourlyDesc.Position = UDim2.new(0, 180, 0, 82)
 hourlyDesc.BackgroundTransparency = 1
-hourlyDesc.Text = "Sends status every hour with runtime"
+hourlyDesc.Text = "Sends status every hour with runtime (no ping)"
 hourlyDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
 hourlyDesc.TextSize = 8
 hourlyDesc.Font = Enum.Font.Gotham
 hourlyDesc.TextXAlignment = Enum.TextXAlignment.Left
+hourlyDesc.TextYAlignment = Enum.TextYAlignment.Top
 hourlyDesc.TextWrapped = true
 hourlyDesc.Parent = extraContent
 
@@ -1461,13 +1463,14 @@ playerBtn.Parent = extraContent
 
 local playerDesc = Instance.new("TextLabel")
 playerDesc.Size = UDim2.new(0, 155, 0, 22)
-playerDesc.Position = UDim2.new(0, 15, 0, 140)
+playerDesc.Position = UDim2.new(0, 15, 0, 142)
 playerDesc.BackgroundTransparency = 1
-playerDesc.Text = "Notifies when players join or leave"
+playerDesc.Text = "Notifies when players join or leave (no ping)"
 playerDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
 playerDesc.TextSize = 8
 playerDesc.Font = Enum.Font.Gotham
 playerDesc.TextXAlignment = Enum.TextXAlignment.Left
+playerDesc.TextYAlignment = Enum.TextYAlignment.Top
 playerDesc.TextWrapped = true
 playerDesc.Parent = extraContent
 
@@ -1485,13 +1488,14 @@ legendaryBtn.Parent = extraContent
 
 local legendaryDesc = Instance.new("TextLabel")
 legendaryDesc.Size = UDim2.new(0, 155, 0, 22)
-legendaryDesc.Position = UDim2.new(0, 180, 0, 140)
+legendaryDesc.Position = UDim2.new(0, 180, 0, 142)
 legendaryDesc.BackgroundTransparency = 1
 legendaryDesc.Text = "Toggle legendary detection (testing)"
 legendaryDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
 legendaryDesc.TextSize = 8
 legendaryDesc.Font = Enum.Font.Gotham
 legendaryDesc.TextXAlignment = Enum.TextXAlignment.Left
+legendaryDesc.TextYAlignment = Enum.TextYAlignment.Top
 legendaryDesc.TextWrapped = true
 legendaryDesc.Parent = extraContent
 
@@ -1509,13 +1513,14 @@ closeScriptBtn.Parent = extraContent
 
 local closeScriptDesc = Instance.new("TextLabel")
 closeScriptDesc.Size = UDim2.new(0, 320, 0, 22)
-closeScriptDesc.Position = UDim2.new(0, 15, 0, 200)
+closeScriptDesc.Position = UDim2.new(0, 15, 0, 202)
 closeScriptDesc.BackgroundTransparency = 1
 closeScriptDesc.Text = "Stop all script functionality"
 closeScriptDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
 closeScriptDesc.TextSize = 8
 closeScriptDesc.Font = Enum.Font.Gotham
 closeScriptDesc.TextXAlignment = Enum.TextXAlignment.Left
+closeScriptDesc.TextYAlignment = Enum.TextYAlignment.Top
 closeScriptDesc.TextWrapped = true
 closeScriptDesc.Parent = extraContent
 
