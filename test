@@ -50,7 +50,14 @@ local discordUserID = ""
 local riftDetectionEnabled = false
 local hourlyStatusEnabled = true -- Default to ON
 local playerTrackingEnabled = true -- Default to ON
-local legendaryDetectionEnabled = false -- Default to OFF (for testing)
+
+-- Pet Detection Settings
+local secretDetectionEnabled = true -- Default to ON
+local secretPingMode = 1 -- 1=ALL, 2=VARIANTS+INFINITY, 3=NONE
+local xlDetectionEnabled = false -- Default to OFF
+local xlPingEnabled = false -- Default to OFF
+local legendaryDetectionEnabled = false -- Default to OFF
+local legendaryPingEnabled = false -- Default to OFF
 
 -- Script start time for runtime calculation
 local scriptStartTime = os.time()
@@ -76,6 +83,35 @@ local function loadSettings()
                     if decoded.discordUserID and type(decoded.discordUserID) == "string" then
                         discordUserID = decoded.discordUserID
                     end
+                    -- Load toggle states
+                    if decoded.riftDetectionEnabled ~= nil then
+                        riftDetectionEnabled = decoded.riftDetectionEnabled
+                    end
+                    if decoded.hourlyStatusEnabled ~= nil then
+                        hourlyStatusEnabled = decoded.hourlyStatusEnabled
+                    end
+                    if decoded.playerTrackingEnabled ~= nil then
+                        playerTrackingEnabled = decoded.playerTrackingEnabled
+                    end
+                    -- Load pet detection settings
+                    if decoded.secretDetectionEnabled ~= nil then
+                        secretDetectionEnabled = decoded.secretDetectionEnabled
+                    end
+                    if decoded.secretPingMode and type(decoded.secretPingMode) == "number" then
+                        secretPingMode = decoded.secretPingMode
+                    end
+                    if decoded.xlDetectionEnabled ~= nil then
+                        xlDetectionEnabled = decoded.xlDetectionEnabled
+                    end
+                    if decoded.xlPingEnabled ~= nil then
+                        xlPingEnabled = decoded.xlPingEnabled
+                    end
+                    if decoded.legendaryDetectionEnabled ~= nil then
+                        legendaryDetectionEnabled = decoded.legendaryDetectionEnabled
+                    end
+                    if decoded.legendaryPingEnabled ~= nil then
+                        legendaryPingEnabled = decoded.legendaryPingEnabled
+                    end
                     print("✓ Settings loaded from file")
                     return true
                 end
@@ -98,7 +134,18 @@ local function saveSettings()
     pcall(function()
         local settings = {
             webhookURL = webhookURL or "",
-            discordUserID = discordUserID or ""
+            discordUserID = discordUserID or "",
+            -- Save toggle states
+            riftDetectionEnabled = riftDetectionEnabled,
+            hourlyStatusEnabled = hourlyStatusEnabled,
+            playerTrackingEnabled = playerTrackingEnabled,
+            -- Save pet detection settings
+            secretDetectionEnabled = secretDetectionEnabled,
+            secretPingMode = secretPingMode,
+            xlDetectionEnabled = xlDetectionEnabled,
+            xlPingEnabled = xlPingEnabled,
+            legendaryDetectionEnabled = legendaryDetectionEnabled,
+            legendaryPingEnabled = legendaryPingEnabled
         }
         local json = HttpService:JSONEncode(settings)
         writefile(SETTINGS_FILE, json)
@@ -452,7 +499,7 @@ local function getTotalEggsHatched()
 end
 
 -- Function to send special webhook (with infinity colors and message)
-local function sendSpecialDiscordNotificationInternal(petName, shiny, mythic, xl, eggName, rarity, pet, petImageUrl, isInfinity)
+local function sendSpecialDiscordNotificationInternal(petName, shiny, mythic, xl, eggName, rarity, pet, petImageUrl, isInfinity, shouldPing)
     if not httpLib or webhookURL == "" then 
         return true
     end
@@ -482,8 +529,11 @@ local function sendSpecialDiscordNotificationInternal(petName, shiny, mythic, xl
     -- Determine color
     local embedColor = getEmbedColor(shiny, mythic, xl, true)
     
-    -- Build mention (for Discord ping)
-    local mention = discordUserID ~= "" and ("<@" .. discordUserID .. ">") or ""
+    -- Build mention (for Discord ping) - only if shouldPing is true
+    local mention = ""
+    if shouldPing and discordUserID ~= "" then
+        mention = "<@" .. discordUserID .. ">"
+    end
     
     -- Calculate probability if PetUtil is available
     local probabilityText = nil
@@ -596,8 +646,206 @@ local function sendSpecialDiscordNotificationInternal(petName, shiny, mythic, xl
     end
 end
 
+-- Function to send simple XL pet notification (light grey, simple format)
+local function sendXLNotification(petName, shiny, mythic, xl, petImageUrl, shouldPing)
+    if not httpLib or webhookURL == "" then 
+        return true -- Return true to not retry if webhook not configured
+    end
+    
+    -- Get player name
+    local playerName = p.Name or "Unknown Player"
+    
+    -- Get total eggs hatched
+    local eggsHatched = getTotalEggsHatched()
+    
+    -- Build pet name with prefix (XL goes AFTER shiny/mythic)
+    local fullPetName = ""
+    if shiny and mythic then
+        fullPetName = "Shiny Mythic "
+    elseif shiny then
+        fullPetName = "Shiny "
+    elseif mythic then
+        fullPetName = "Mythic "
+    end
+    
+    if xl then
+        fullPetName = fullPetName .. "XL "
+    end
+    
+    fullPetName = fullPetName .. petName
+    
+    -- Light grey color
+    local embedColor = 11053224 -- Light grey
+    
+    -- Determine "a" or "an"
+    local article = "a"
+    if not shiny and not mythic and petName then
+        local firstLetter = string.lower(string.sub(petName, 1, 1))
+        if firstLetter == "a" or firstLetter == "e" or firstLetter == "i" or firstLetter == "o" or firstLetter == "u" then
+            article = "an"
+        end
+    end
+    
+    -- Build description
+    local description = "**" .. playerName .. "** hatched " .. article .. " **" .. fullPetName .. "**!"
+    
+    -- Build mention (for Discord ping)
+    local mention = ""
+    if shouldPing and discordUserID ~= "" then
+        mention = "<@" .. discordUserID .. ">"
+    end
+    
+    -- Build embed
+    local embed = {
+        title = "🎉 XL Pet Hatched!",
+        description = description,
+        color = embedColor,
+        timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+    }
+    
+    -- Add thumbnail if pet image URL is available
+    if petImageUrl then
+        embed.thumbnail = {
+            url = petImageUrl
+        }
+    end
+    
+    -- Add footer with eggs hatched count
+    if eggsHatched then
+        local formattedCount = eggsHatched
+        if FormatCommas then
+            formattedCount = FormatCommas(eggsHatched)
+        else
+            formattedCount = tostring(eggsHatched):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
+        end
+        embed.footer = {
+            text = "Eggs hatched: " .. formattedCount
+        }
+    end
+    
+    -- Build payload
+    local payload = {
+        content = mention ~= "" and mention or nil,
+        embeds = {embed}
+    }
+    
+    local headers = {["Content-Type"] = "application/json"}
+    local json = jsonEncode(payload)
+    local success, response, status = httpLib(webhookURL, "POST", headers, json)
+    
+    if success and (status == 200 or status == 204) then
+        print("✓ XL notification sent! Status: " .. tostring(status))
+        return true
+    elseif status == 429 then
+        print("✗ XL notification rate limited (429), will retry...")
+        return false
+    else
+        print("✗ XL notification failed! Status: " .. tostring(status))
+        return true
+    end
+end
+
+-- Function to send simple Legendary pet notification (light grey, simple format)
+local function sendLegendaryNotification(petName, shiny, mythic, xl, petImageUrl, shouldPing)
+    if not httpLib or webhookURL == "" then 
+        return true -- Return true to not retry if webhook not configured
+    end
+    
+    -- Get player name
+    local playerName = p.Name or "Unknown Player"
+    
+    -- Get total eggs hatched
+    local eggsHatched = getTotalEggsHatched()
+    
+    -- Build pet name with prefix (XL goes AFTER shiny/mythic)
+    local fullPetName = ""
+    if shiny and mythic then
+        fullPetName = "Shiny Mythic "
+    elseif shiny then
+        fullPetName = "Shiny "
+    elseif mythic then
+        fullPetName = "Mythic "
+    end
+    
+    if xl then
+        fullPetName = fullPetName .. "XL "
+    end
+    
+    fullPetName = fullPetName .. petName
+    
+    -- Light grey color
+    local embedColor = 11053224 -- Light grey
+    
+    -- Determine "a" or "an"
+    local article = "a"
+    if not shiny and not mythic and petName then
+        local firstLetter = string.lower(string.sub(petName, 1, 1))
+        if firstLetter == "a" or firstLetter == "e" or firstLetter == "i" or firstLetter == "o" or firstLetter == "u" then
+            article = "an"
+        end
+    end
+    
+    -- Build description
+    local description = "**" .. playerName .. "** hatched " .. article .. " **" .. fullPetName .. "**!"
+    
+    -- Build mention (for Discord ping)
+    local mention = ""
+    if shouldPing and discordUserID ~= "" then
+        mention = "<@" .. discordUserID .. ">"
+    end
+    
+    -- Build embed
+    local embed = {
+        title = "✨ Legendary Pet Hatched!",
+        description = description,
+        color = embedColor,
+        timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+    }
+    
+    -- Add thumbnail if pet image URL is available
+    if petImageUrl then
+        embed.thumbnail = {
+            url = petImageUrl
+        }
+    end
+    
+    -- Add footer with eggs hatched count
+    if eggsHatched then
+        local formattedCount = eggsHatched
+        if FormatCommas then
+            formattedCount = FormatCommas(eggsHatched)
+        else
+            formattedCount = tostring(eggsHatched):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
+        end
+        embed.footer = {
+            text = "Eggs hatched: " .. formattedCount
+        }
+    end
+    
+    -- Build payload
+    local payload = {
+        content = mention ~= "" and mention or nil,
+        embeds = {embed}
+    }
+    
+    local headers = {["Content-Type"] = "application/json"}
+    local json = jsonEncode(payload)
+    local success, response, status = httpLib(webhookURL, "POST", headers, json)
+    
+    if success and (status == 200 or status == 204) then
+        print("✓ Legendary notification sent! Status: " .. tostring(status))
+        return true
+    elseif status == 429 then
+        print("✗ Legendary notification rate limited (429), will retry...")
+        return false
+    else
+        print("✗ Legendary notification failed! Status: " .. tostring(status))
+        return true
+    end
+end
+
 -- Function to send webhook (with 429 retry logic) - MUST be defined first
-local function sendDiscordNotificationInternal(petName, shiny, mythic, xl, eggName, rarity, pet, petImageUrl)
+local function sendDiscordNotificationInternal(petName, shiny, mythic, xl, eggName, rarity, pet, petImageUrl, shouldPing)
     if not httpLib or webhookURL == "" then 
         return true -- Return true to not retry if webhook not configured
     end
@@ -627,8 +875,11 @@ local function sendDiscordNotificationInternal(petName, shiny, mythic, xl, eggNa
     -- Determine color
     local embedColor = getEmbedColor(shiny, mythic, xl, false)
     
-    -- Build mention (for Discord ping)
-    local mention = discordUserID ~= "" and ("<@" .. discordUserID .. ">") or ""
+    -- Build mention (for Discord ping) - only if shouldPing is true
+    local mention = ""
+    if shouldPing and discordUserID ~= "" then
+        mention = "<@" .. discordUserID .. ">"
+    end
     
     -- Calculate probability if PetUtil is available
     local probabilityText = nil
@@ -813,6 +1064,8 @@ local function processWebhookQueue()
                 local petImageUrl = webhookData.petImageUrl
                 local isSpecial = webhookData.isSpecial == true
                 local isInfinity = webhookData.isInfinity == true
+                local notificationType = webhookData.notificationType
+                local shouldPing = webhookData.shouldPing or false
                 
                 local maxRetries = 5
                 local retryCount = 0
@@ -820,9 +1073,20 @@ local function processWebhookQueue()
                 
                 while retryCount < maxRetries and not success do
                     if isSpecial then
-                        success = sendSpecialDiscordNotificationInternal(petName, shiny, mythic, xl, eggName, rarity, pet, petImageUrl, isInfinity)
+                        -- Infinity notification (with shouldPing parameter)
+                        success = sendSpecialDiscordNotificationInternal(petName, shiny, mythic, xl, eggName, rarity, pet, petImageUrl, isInfinity, shouldPing)
+                    elseif notificationType == "secret" then
+                        -- Regular secret notification (with shouldPing parameter)
+                        success = sendDiscordNotificationInternal(petName, shiny, mythic, xl, eggName, rarity, pet, petImageUrl, shouldPing)
+                    elseif notificationType == "xl" then
+                        -- Simple XL notification
+                        success = sendXLNotification(petName, shiny, mythic, xl, petImageUrl, shouldPing)
+                    elseif notificationType == "legendary" then
+                        -- Simple Legendary notification
+                        success = sendLegendaryNotification(petName, shiny, mythic, xl, petImageUrl, shouldPing)
                     else
-                        success = sendDiscordNotificationInternal(petName, shiny, mythic, xl, eggName, rarity, pet, petImageUrl)
+                        -- Fallback to regular notification (old behavior)
+                        success = sendDiscordNotificationInternal(petName, shiny, mythic, xl, eggName, rarity, pet, petImageUrl, false)
                     end
                     
                     if not success then
@@ -927,6 +1191,13 @@ local function sendDiscordNotification(petName, shiny, mythic, xl, eggName, rari
         end
     end
     
+    -- This function now just queues the notification with specified type and ping status
+    -- The calling code (connectToEvents) determines notificationType and shouldPing
+    
+    -- NOTE: This function signature is now extended to accept notificationType and shouldPing
+    -- But we're being called from the old signature, so we need to handle that
+    -- For backward compatibility, we'll use the old logic if notificationType is not passed
+    
     -- Check if this is a special pet
     local isSpecial = isSpecialPet(petName)
     local isInfinity = isInfinityRarity(rarity)
@@ -967,6 +1238,148 @@ local function sendDiscordNotification(petName, shiny, mythic, xl, eggName, rari
             pet = pet,
             petImageUrl = petImageUrl,
             isSpecial = false
+        })
+    end
+    
+    -- Start processing queue if not already processing
+    processWebhookQueue()
+end
+
+-- NEW: Unified function to send pet notifications with explicit notification type and ping control
+local function sendPetNotification(petName, shiny, mythic, xl, eggName, rarity, pet, notificationType, shouldPing)
+    -- Don't process if script is closed
+    if not scriptActive then
+        return
+    end
+    
+    if webhookURL == "" then
+        print("✗ Webhook URL not set")
+        return
+    end
+    
+    if not httpLib then
+        print("✗ HTTP library not available")
+        return
+    end
+    
+    -- Get pet image URL
+    local petImageUrl = nil
+    if PetsData and petName then
+        local success, petData = pcall(function()
+            return PetsData[petName]
+        end)
+        
+        if success and petData and petData.Images then
+            -- Determine image type based on shiny/mythic/xl status
+            local imageType = "Normal"
+            if shiny and mythic and xl then
+                imageType = "MythicShinyXL"
+            elseif shiny and mythic then
+                imageType = "MythicShiny"
+            elseif mythic and xl then
+                imageType = "MythicXL"
+            elseif shiny and xl then
+                imageType = "ShinyXL"
+            elseif shiny then
+                imageType = "Shiny"
+            elseif mythic then
+                imageType = "Mythic"
+            elseif xl then
+                imageType = "XL"
+            end
+            
+            -- Get the image asset ID with cascading fallbacks
+            local petImageAsset = petData.Images[imageType]
+            
+            -- If exact combination not found, try simpler versions
+            if not petImageAsset then
+                if shiny and mythic then
+                    petImageAsset = petData.Images["MythicShiny"]
+                elseif shiny then
+                    petImageAsset = petData.Images["Shiny"]
+                elseif mythic then
+                    petImageAsset = petData.Images["Mythic"]
+                end
+            end
+            
+            -- Final fallback to Normal
+            petImageAsset = petImageAsset or petData.Images["Normal"]
+            
+            if petImageAsset then
+                -- Extract asset ID from rbxassetid:// format
+                local assetId = petImageAsset:match("rbxassetid://(%d+)")
+                
+                if assetId then
+                    -- Convert to Discord-compatible thumbnail URL
+                    petImageUrl = getThumbnailUrl(assetId)
+                end
+            end
+        end
+    end
+    
+    -- Determine which notification to send based on notificationType
+    if notificationType == "infinity" then
+        -- Special infinity notification
+        local isInfinity = isInfinityRarity(rarity)
+        
+        table.insert(webhookQueue, {
+            petName = petName,
+            shiny = shiny,
+            mythic = mythic,
+            xl = xl,
+            eggName = eggName,
+            rarity = rarity,
+            pet = pet,
+            petImageUrl = petImageUrl,
+            isSpecial = true,
+            isInfinity = isInfinity,
+            shouldPing = shouldPing
+        })
+        
+        -- Add debug message
+        local debugMessage = isInfinity and 
+            "The rarity of this pet is specified as Infinity" or 
+            ("The rarity is not infinity. Rarity: " .. (rarity or "Unknown"))
+        table.insert(webhookQueue, {
+            debugMessage = debugMessage,
+            isDebug = true
+        })
+    elseif notificationType == "secret" then
+        -- Regular secret notification
+        table.insert(webhookQueue, {
+            petName = petName,
+            shiny = shiny,
+            mythic = mythic,
+            xl = xl,
+            eggName = eggName,
+            rarity = rarity,
+            pet = pet,
+            petImageUrl = petImageUrl,
+            isSpecial = false,
+            notificationType = "secret",
+            shouldPing = shouldPing
+        })
+    elseif notificationType == "xl" then
+        -- XL notification (simple format)
+        table.insert(webhookQueue, {
+            petName = petName,
+            shiny = shiny,
+            mythic = mythic,
+            xl = xl,
+            petImageUrl = petImageUrl,
+            notificationType = "xl",
+            shouldPing = shouldPing
+        })
+    elseif notificationType == "legendary" then
+        -- Legendary notification (simple format)
+        table.insert(webhookQueue, {
+            petName = petName,
+            shiny = shiny,
+            mythic = mythic,
+            xl = xl,
+            petImageUrl = petImageUrl,
+            notificationType = "legendary",
+            shouldPing = shouldPing
         })
     end
     
@@ -1025,33 +1438,74 @@ local function connectToEvents()
                             if petName and ItemUtil then
                                 local rarity = ItemUtil:GetRarity(pet)
                                 
-                                -- Check if this is a special pet (regardless of rarity)
+                                -- Check pet characteristics
                                 local isSpecial = isSpecialPet(petName)
-                                
-                                -- Check if Secret
                                 local isSecret = rarity == "Secret"
+                                local isLegendary = rarity == "Legendary"
+                                local isVariant = shiny or mythic or xl
                                 
-                                -- Check if Legendary (only if toggle is enabled)
-                                local isLegendary = false
-                                if legendaryDetectionEnabled then
-                                    isLegendary = (rarity == "Legendary")
+                                -- Determine notification type and whether to send based on detection settings
+                                local notificationType = nil
+                                local shouldSend = false
+                                
+                                -- Priority 1: Infinity pets (special pets, follows secret detection settings)
+                                if isSpecial then
+                                    if secretDetectionEnabled then
+                                        notificationType = "infinity"
+                                        shouldSend = true
+                                        print(">>> INFINITY PET DETECTED! <<<")
+                                    end
+                                -- Priority 2: Secret pets
+                                elseif isSecret then
+                                    if secretDetectionEnabled then
+                                        notificationType = "secret"
+                                        shouldSend = true
+                                        print(">>> SECRET DETECTED! <<<")
+                                    end
+                                -- Priority 3: XL pets (non-secret)
+                                elseif xl then
+                                    if xlDetectionEnabled or (isLegendary and legendaryDetectionEnabled) then
+                                        notificationType = "xl"
+                                        shouldSend = true
+                                        print(">>> XL PET DETECTED! <<<")
+                                    end
+                                -- Priority 4: Legendary pets (non-XL)
+                                elseif isLegendary then
+                                    if legendaryDetectionEnabled then
+                                        notificationType = "legendary"
+                                        shouldSend = true
+                                        print(">>> LEGENDARY DETECTED! <<<")
+                                    end
                                 end
                                 
-                                -- Send notification if:
-                                -- 1. It's a Secret pet, OR
-                                -- 2. It's a Legendary pet (only if DETECT_LEGENDARIES is true), OR
-                                -- 3. It's a special pet (regardless of rarity)
-                                if isSecret or isLegendary or isSpecial then
-                                    if isSecret then
-                                        print(">>> SECRET DETECTED! <<<")
-                                    elseif isLegendary then
-                                        print(">>> LEGENDARY DETECTED! <<<")
-                                    elseif isSpecial then
-                                        print(">>> SPECIAL PET DETECTED! <<<")
+                                -- Determine ping status
+                                local shouldPing = false
+                                
+                                if shouldSend then
+                                    -- Ping logic for Infinity/Secret pets
+                                    if isSpecial or isSecret then
+                                        if secretPingMode == 1 then
+                                            -- ALL: ping all secrets
+                                            shouldPing = true
+                                        elseif secretPingMode == 2 then
+                                            -- VARIANTS+INFINITY: ping variants or infinity
+                                            if isVariant or isSpecial then
+                                                shouldPing = true
+                                            end
+                                        end
+                                        -- Mode 3 (NONE): shouldPing stays false
                                     end
                                     
-                                    -- Send webhook with XL parameter
-                                    sendDiscordNotification(petName, shiny, mythic, xl, eggName, rarity, pet)
+                                    -- Additional ping overrides (accumulative)
+                                    if xl and xlPingEnabled then
+                                        shouldPing = true
+                                    end
+                                    if isLegendary and legendaryPingEnabled then
+                                        shouldPing = true
+                                    end
+                                    
+                                    -- Send notification with determined type and ping status
+                                    sendPetNotification(petName, shiny, mythic, xl, eggName, rarity, pet, notificationType, shouldPing)
                                 end
                             end
                         end
@@ -1253,10 +1707,22 @@ hatchingTab.Font = Enum.Font.GothamBold
 hatchingTab.BorderSizePixel = 0
 hatchingTab.Parent = tabContainer
 
+-- Pet Detection tab button (new)
+local detectionTab = Instance.new("TextButton")
+detectionTab.Size = UDim2.new(1, 0, 0, 50)
+detectionTab.Position = UDim2.new(0, 0, 0, 50)
+detectionTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+detectionTab.Text = "Pet Detection"
+detectionTab.TextColor3 = Color3.fromRGB(255, 255, 255)
+detectionTab.TextSize = 12
+detectionTab.Font = Enum.Font.GothamBold
+detectionTab.BorderSizePixel = 0
+detectionTab.Parent = tabContainer
+
 -- Extra tab button
 local extraTab = Instance.new("TextButton")
 extraTab.Size = UDim2.new(1, 0, 0, 50)
-extraTab.Position = UDim2.new(0, 0, 0, 50)
+extraTab.Position = UDim2.new(0, 0, 0, 100)
 extraTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 extraTab.Text = "Extra"
 extraTab.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -1272,12 +1738,188 @@ hatchingContent.BackgroundTransparency = 1
 hatchingContent.Visible = true
 hatchingContent.Parent = contentContainer
 
+-- Pet Detection content frame (new)
+local detectionContent = Instance.new("Frame")
+detectionContent.Size = UDim2.new(1, 0, 1, 0)
+detectionContent.BackgroundTransparency = 1
+detectionContent.Visible = false
+detectionContent.Parent = contentContainer
+
 -- Extra content frame
 local extraContent = Instance.new("Frame")
 extraContent.Size = UDim2.new(1, 0, 1, 0)
 extraContent.BackgroundTransparency = 1
 extraContent.Visible = false
 extraContent.Parent = contentContainer
+
+-- ==================== PET DETECTION TAB CONTENT ====================
+
+-- Detection title
+local detectionTitle = Instance.new("TextLabel")
+detectionTitle.Size = UDim2.new(1, 0, 0, 40)
+detectionTitle.Position = UDim2.new(0, 0, 0, 0)
+detectionTitle.BackgroundColor3 = Color3.fromRGB(60, 120, 200)
+detectionTitle.Text = "Pet Detection Settings"
+detectionTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+detectionTitle.TextSize = 16
+detectionTitle.Font = Enum.Font.GothamBold
+detectionTitle.BorderSizePixel = 0
+detectionTitle.Parent = detectionContent
+
+-- Row 1: Secret Detection (left) and Secret Ping Mode (right)
+-- Secret Detection button (top-left)
+local secretBtn = Instance.new("TextButton")
+secretBtn.Size = UDim2.new(0, 155, 0, 28)
+secretBtn.Position = UDim2.new(0, 15, 0, 50)
+secretBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50) -- Default ON
+secretBtn.Text = "Detect Secrets: ON"
+secretBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+secretBtn.TextSize = 11
+secretBtn.Font = Enum.Font.GothamBold
+secretBtn.BorderSizePixel = 0
+secretBtn.Parent = detectionContent
+
+local secretDesc = Instance.new("TextLabel")
+secretDesc.Size = UDim2.new(0, 155, 0, 22)
+secretDesc.Position = UDim2.new(0, 15, 0, 82)
+secretDesc.BackgroundTransparency = 1
+secretDesc.Text = "Toggle secret pet detection"
+secretDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
+secretDesc.TextSize = 8
+secretDesc.Font = Enum.Font.Gotham
+secretDesc.TextXAlignment = Enum.TextXAlignment.Left
+secretDesc.TextYAlignment = Enum.TextYAlignment.Top
+secretDesc.TextWrapped = true
+secretDesc.Parent = detectionContent
+
+-- Secret Ping Mode button (top-right)
+local secretPingBtn = Instance.new("TextButton")
+secretPingBtn.Size = UDim2.new(0, 155, 0, 28)
+secretPingBtn.Position = UDim2.new(0, 180, 0, 50)
+secretPingBtn.BackgroundColor3 = Color3.fromRGB(100, 150, 255)
+secretPingBtn.Text = "Secret Pings: ALL"
+secretPingBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+secretPingBtn.TextSize = 11
+secretPingBtn.Font = Enum.Font.GothamBold
+secretPingBtn.BorderSizePixel = 0
+secretPingBtn.Parent = detectionContent
+
+local secretPingDesc = Instance.new("TextLabel")
+secretPingDesc.Size = UDim2.new(0, 155, 0, 22)
+secretPingDesc.Position = UDim2.new(0, 180, 0, 82)
+secretPingDesc.BackgroundTransparency = 1
+secretPingDesc.Text = "ALL / VARIANTS+INFINITY / NONE"
+secretPingDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
+secretPingDesc.TextSize = 8
+secretPingDesc.Font = Enum.Font.Gotham
+secretPingDesc.TextXAlignment = Enum.TextXAlignment.Left
+secretPingDesc.TextYAlignment = Enum.TextYAlignment.Top
+secretPingDesc.TextWrapped = true
+secretPingDesc.Parent = detectionContent
+
+-- Row 2: XL Detection (left) and XL Ping (right)
+-- XL Detection button (middle-left)
+local xlBtn = Instance.new("TextButton")
+xlBtn.Size = UDim2.new(0, 155, 0, 28)
+xlBtn.Position = UDim2.new(0, 15, 0, 110)
+xlBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60) -- Default OFF
+xlBtn.Text = "Detect XL Pets: OFF"
+xlBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+xlBtn.TextSize = 11
+xlBtn.Font = Enum.Font.GothamBold
+xlBtn.BorderSizePixel = 0
+xlBtn.Parent = detectionContent
+
+local xlDesc = Instance.new("TextLabel")
+xlDesc.Size = UDim2.new(0, 155, 0, 22)
+xlDesc.Position = UDim2.new(0, 15, 0, 142)
+xlDesc.BackgroundTransparency = 1
+xlDesc.Text = "Toggle XL pet notifications (non-secrets)"
+xlDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
+xlDesc.TextSize = 8
+xlDesc.Font = Enum.Font.Gotham
+xlDesc.TextXAlignment = Enum.TextXAlignment.Left
+xlDesc.TextYAlignment = Enum.TextYAlignment.Top
+xlDesc.TextWrapped = true
+xlDesc.Parent = detectionContent
+
+-- XL Ping button (middle-right)
+local xlPingBtn = Instance.new("TextButton")
+xlPingBtn.Size = UDim2.new(0, 155, 0, 28)
+xlPingBtn.Position = UDim2.new(0, 180, 0, 110)
+xlPingBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60) -- Default OFF
+xlPingBtn.Text = "XL Pings: OFF"
+xlPingBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+xlPingBtn.TextSize = 11
+xlPingBtn.Font = Enum.Font.GothamBold
+xlPingBtn.BorderSizePixel = 0
+xlPingBtn.Parent = detectionContent
+
+local xlPingDesc = Instance.new("TextLabel")
+xlPingDesc.Size = UDim2.new(0, 155, 0, 22)
+xlPingDesc.Position = UDim2.new(0, 180, 0, 142)
+xlPingDesc.BackgroundTransparency = 1
+xlPingDesc.Text = "Ping when XL pets hatch"
+xlPingDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
+xlPingDesc.TextSize = 8
+xlPingDesc.Font = Enum.Font.Gotham
+xlPingDesc.TextXAlignment = Enum.TextXAlignment.Left
+xlPingDesc.TextYAlignment = Enum.TextYAlignment.Top
+xlPingDesc.TextWrapped = true
+xlPingDesc.Parent = detectionContent
+
+-- Row 3: Legendary Detection (left) and Legendary Ping (right)
+-- Legendary Detection button (bottom-left)
+local legendaryBtn = Instance.new("TextButton")
+legendaryBtn.Size = UDim2.new(0, 155, 0, 28)
+legendaryBtn.Position = UDim2.new(0, 15, 0, 170)
+legendaryBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60) -- Default OFF
+legendaryBtn.Text = "Legendary Detection: OFF"
+legendaryBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+legendaryBtn.TextSize = 10
+legendaryBtn.Font = Enum.Font.GothamBold
+legendaryBtn.BorderSizePixel = 0
+legendaryBtn.Parent = detectionContent
+
+local legendaryDesc = Instance.new("TextLabel")
+legendaryDesc.Size = UDim2.new(0, 155, 0, 22)
+legendaryDesc.Position = UDim2.new(0, 15, 0, 202)
+legendaryDesc.BackgroundTransparency = 1
+legendaryDesc.Text = "Toggle legendary detection (testing)"
+legendaryDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
+legendaryDesc.TextSize = 8
+legendaryDesc.Font = Enum.Font.Gotham
+legendaryDesc.TextXAlignment = Enum.TextXAlignment.Left
+legendaryDesc.TextYAlignment = Enum.TextYAlignment.Top
+legendaryDesc.TextWrapped = true
+legendaryDesc.Parent = detectionContent
+
+-- Legendary Ping button (bottom-right)
+local legendaryPingBtn = Instance.new("TextButton")
+legendaryPingBtn.Size = UDim2.new(0, 155, 0, 28)
+legendaryPingBtn.Position = UDim2.new(0, 180, 0, 170)
+legendaryPingBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60) -- Default OFF
+legendaryPingBtn.Text = "Legendary Pings: OFF"
+legendaryPingBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+legendaryPingBtn.TextSize = 10
+legendaryPingBtn.Font = Enum.Font.GothamBold
+legendaryPingBtn.BorderSizePixel = 0
+legendaryPingBtn.Parent = detectionContent
+
+local legendaryPingDesc = Instance.new("TextLabel")
+legendaryPingDesc.Size = UDim2.new(0, 155, 0, 22)
+legendaryPingDesc.Position = UDim2.new(0, 180, 0, 202)
+legendaryPingDesc.BackgroundTransparency = 1
+legendaryPingDesc.Text = "Ping when legendary pets hatch"
+legendaryPingDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
+legendaryPingDesc.TextSize = 8
+legendaryPingDesc.Font = Enum.Font.Gotham
+legendaryPingDesc.TextXAlignment = Enum.TextXAlignment.Left
+legendaryPingDesc.TextYAlignment = Enum.TextYAlignment.Top
+legendaryPingDesc.TextWrapped = true
+legendaryPingDesc.Parent = detectionContent
+
+-- ==================== HATCHING TAB CONTENT ====================
 
 -- Title bar (in hatching content)
 local title = Instance.new("TextLabel")
@@ -1448,8 +2090,8 @@ hourlyDesc.TextYAlignment = Enum.TextYAlignment.Top
 hourlyDesc.TextWrapped = true
 hourlyDesc.Parent = extraContent
 
--- Row 2: Player Tracking (left) and Legendary Detection (right)
--- Player tracking button (middle-left)
+-- Row 2: Player Tracking (left) and Close Script (right)
+-- Player tracking button (bottom-left)
 local playerBtn = Instance.new("TextButton")
 playerBtn.Size = UDim2.new(0, 155, 0, 28)
 playerBtn.Position = UDim2.new(0, 15, 0, 110)
@@ -1474,35 +2116,10 @@ playerDesc.TextYAlignment = Enum.TextYAlignment.Top
 playerDesc.TextWrapped = true
 playerDesc.Parent = extraContent
 
--- Legendary Detection button (middle-right)
-local legendaryBtn = Instance.new("TextButton")
-legendaryBtn.Size = UDim2.new(0, 155, 0, 28)
-legendaryBtn.Position = UDim2.new(0, 180, 0, 110)
-legendaryBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60) -- Start as OFF (default)
-legendaryBtn.Text = "Legendary Detection: OFF"
-legendaryBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-legendaryBtn.TextSize = 10
-legendaryBtn.Font = Enum.Font.GothamBold
-legendaryBtn.BorderSizePixel = 0
-legendaryBtn.Parent = extraContent
-
-local legendaryDesc = Instance.new("TextLabel")
-legendaryDesc.Size = UDim2.new(0, 155, 0, 22)
-legendaryDesc.Position = UDim2.new(0, 180, 0, 142)
-legendaryDesc.BackgroundTransparency = 1
-legendaryDesc.Text = "Toggle legendary detection (testing)"
-legendaryDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
-legendaryDesc.TextSize = 8
-legendaryDesc.Font = Enum.Font.Gotham
-legendaryDesc.TextXAlignment = Enum.TextXAlignment.Left
-legendaryDesc.TextYAlignment = Enum.TextYAlignment.Top
-legendaryDesc.TextWrapped = true
-legendaryDesc.Parent = extraContent
-
--- Close Script button (bottom, full width)
+-- Close Script button (bottom-right)
 local closeScriptBtn = Instance.new("TextButton")
-closeScriptBtn.Size = UDim2.new(0, 320, 0, 28)
-closeScriptBtn.Position = UDim2.new(0, 15, 0, 170)
+closeScriptBtn.Size = UDim2.new(0, 155, 0, 28)
+closeScriptBtn.Position = UDim2.new(0, 180, 0, 110)
 closeScriptBtn.BackgroundColor3 = Color3.fromRGB(80, 40, 40)
 closeScriptBtn.Text = "Close Script"
 closeScriptBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -1512,8 +2129,8 @@ closeScriptBtn.BorderSizePixel = 0
 closeScriptBtn.Parent = extraContent
 
 local closeScriptDesc = Instance.new("TextLabel")
-closeScriptDesc.Size = UDim2.new(0, 320, 0, 22)
-closeScriptDesc.Position = UDim2.new(0, 15, 0, 202)
+closeScriptDesc.Size = UDim2.new(0, 155, 0, 22)
+closeScriptDesc.Position = UDim2.new(0, 180, 0, 142)
 closeScriptDesc.BackgroundTransparency = 1
 closeScriptDesc.Text = "Stop all script functionality"
 closeScriptDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
@@ -1585,15 +2202,28 @@ noBtn.Parent = confirmFrame
 -- Tab switching logic
 hatchingTab.Activated:Connect(function()
     hatchingContent.Visible = true
+    detectionContent.Visible = false
     extraContent.Visible = false
     hatchingTab.BackgroundColor3 = Color3.fromRGB(60, 120, 200)
+    detectionTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    extraTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+end)
+
+detectionTab.Activated:Connect(function()
+    hatchingContent.Visible = false
+    detectionContent.Visible = true
+    extraContent.Visible = false
+    hatchingTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    detectionTab.BackgroundColor3 = Color3.fromRGB(60, 120, 200)
     extraTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 end)
 
 extraTab.Activated:Connect(function()
     hatchingContent.Visible = false
+    detectionContent.Visible = false
     extraContent.Visible = true
     hatchingTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    detectionTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
     extraTab.BackgroundColor3 = Color3.fromRGB(60, 120, 200)
 end)
 
@@ -1637,6 +2267,8 @@ riftBtn.Activated:Connect(function()
         riftBtn.Text = "Rift Detection: OFF"
         riftBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
     end
+    
+    saveSettings()
 end)
 
 -- Hourly status toggle
@@ -1652,6 +2284,8 @@ hourlyBtn.Activated:Connect(function()
         hourlyBtn.Text = "Hourly Status: OFF"
         hourlyBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
     end
+    
+    saveSettings()
 end)
 
 -- Player tracking toggle
@@ -1667,11 +2301,89 @@ playerBtn.Activated:Connect(function()
         playerBtn.Text = "Player Track: OFF"
         playerBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
     end
+    
+    saveSettings()
 end)
 
 -- Close Script button - opens confirmation dialog
 closeScriptBtn.Activated:Connect(function()
     confirmFrame.Visible = true
+end)
+
+-- Pet Detection Tab Button Handlers
+
+-- Secret Detection toggle
+secretBtn.Activated:Connect(function()
+    if not scriptActive then return end
+    
+    secretDetectionEnabled = not secretDetectionEnabled
+    
+    if secretDetectionEnabled then
+        secretBtn.Text = "Detect Secrets: ON"
+        secretBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+    else
+        secretBtn.Text = "Detect Secrets: OFF"
+        secretBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    end
+    
+    saveSettings()
+end)
+
+-- Secret Ping Mode toggle (cycles through 3 modes)
+secretPingBtn.Activated:Connect(function()
+    if not scriptActive then return end
+    
+    secretPingMode = secretPingMode + 1
+    if secretPingMode > 3 then
+        secretPingMode = 1
+    end
+    
+    if secretPingMode == 1 then
+        secretPingBtn.Text = "Secret Pings: ALL"
+        secretPingBtn.BackgroundColor3 = Color3.fromRGB(100, 150, 255)
+    elseif secretPingMode == 2 then
+        secretPingBtn.Text = "Secret Pings: VARIANTS"
+        secretPingBtn.BackgroundColor3 = Color3.fromRGB(150, 100, 255)
+    else
+        secretPingBtn.Text = "Secret Pings: NONE"
+        secretPingBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    end
+    
+    saveSettings()
+end)
+
+-- XL Detection toggle
+xlBtn.Activated:Connect(function()
+    if not scriptActive then return end
+    
+    xlDetectionEnabled = not xlDetectionEnabled
+    
+    if xlDetectionEnabled then
+        xlBtn.Text = "Detect XL Pets: ON"
+        xlBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+    else
+        xlBtn.Text = "Detect XL Pets: OFF"
+        xlBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    end
+    
+    saveSettings()
+end)
+
+-- XL Ping toggle
+xlPingBtn.Activated:Connect(function()
+    if not scriptActive then return end
+    
+    xlPingEnabled = not xlPingEnabled
+    
+    if xlPingEnabled then
+        xlPingBtn.Text = "XL Pings: ON"
+        xlPingBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+    else
+        xlPingBtn.Text = "XL Pings: OFF"
+        xlPingBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    end
+    
+    saveSettings()
 end)
 
 -- Legendary Detection toggle
@@ -1687,6 +2399,25 @@ legendaryBtn.Activated:Connect(function()
         legendaryBtn.Text = "Legendary Detection: OFF"
         legendaryBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
     end
+    
+    saveSettings()
+end)
+
+-- Legendary Ping toggle
+legendaryPingBtn.Activated:Connect(function()
+    if not scriptActive then return end
+    
+    legendaryPingEnabled = not legendaryPingEnabled
+    
+    if legendaryPingEnabled then
+        legendaryPingBtn.Text = "Legendary Pings: ON"
+        legendaryPingBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+    else
+        legendaryPingBtn.Text = "Legendary Pings: OFF"
+        legendaryPingBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    end
+    
+    saveSettings()
 end)
 
 -- Hide X button - hides main GUI
