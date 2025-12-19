@@ -14,12 +14,10 @@ local p = P.LocalPlayer
 -- Special Pets (pets that should receive special notifications)
 -- Add pet names here (case insensitive, supports spaces)
 local SPECIAL_PETS = {
-    "Neon Elemental",
-    "Inferno Dragon",
     "Morning Star",
     "Christmas Robot",
     "Rumblecon God",
-    "Leviathan",
+    "The Leviathan",
     "Sylently's Pet"
     -- Add more pet names here as needed
 }
@@ -158,6 +156,9 @@ local webhookQueue = {}
 local isSendingWebhook = false
 local messagesRemainingWithDelay = 0 -- Counter for messages that need 2s delay after rate limit
 
+-- Cache for thumbnail URLs to avoid repeated HTTP requests
+local thumbnailUrlCache = {}
+
 -- Script state
 local scriptActive = true
 local hatchEventConnection = nil
@@ -243,10 +244,15 @@ if request then
     httpLibName = "request"
 end
 
--- Function to get Discord-compatible thumbnail URL from Roblox asset ID
+-- Function to get Discord-compatible thumbnail URL from Roblox asset ID (with caching)
 local function getThumbnailUrl(assetId)
     if not assetId then
         return nil
+    end
+    
+    -- Check cache first
+    if thumbnailUrlCache[assetId] then
+        return thumbnailUrlCache[assetId]
     end
     
     local url = "https://thumbnails.roproxy.com/v1/assets?assetIds=" .. assetId .. "&size=420x420&format=Png&isCircular=false"
@@ -288,7 +294,10 @@ local function getThumbnailUrl(assetId)
     end
     
     if decoded and decoded.data and decoded.data[1] and decoded.data[1].imageUrl then
-        return decoded.data[1].imageUrl
+        local imageUrl = decoded.data[1].imageUrl
+        -- Cache the result
+        thumbnailUrlCache[assetId] = imageUrl
+        return imageUrl
     end
     
     return nil
@@ -1061,7 +1070,11 @@ local function processWebhookQueue()
                 local eggName = webhookData.eggName
                 local rarity = webhookData.rarity
                 local pet = webhookData.pet
+                -- OPTIMIZED: Fetch thumbnail URL lazily here (or use cached/pre-fetched URL)
                 local petImageUrl = webhookData.petImageUrl
+                if not petImageUrl and webhookData.petImageAssetId then
+                    petImageUrl = getThumbnailUrl(webhookData.petImageAssetId)
+                end
                 local isSpecial = webhookData.isSpecial == true
                 local isInfinity = webhookData.isInfinity == true
                 local notificationType = webhookData.notificationType
@@ -1120,6 +1133,7 @@ local function processWebhookQueue()
 end
 
 -- Public function to queue webhook (handles rate limiting)
+-- OPTIMIZED: No longer blocks on thumbnail URL fetching
 local function sendDiscordNotification(petName, shiny, mythic, xl, eggName, rarity, pet)
     -- Don't process if script is closed
     if not scriptActive then
@@ -1136,60 +1150,8 @@ local function sendDiscordNotification(petName, shiny, mythic, xl, eggName, rari
         return
     end
     
-    -- Get pet image URL
-    local petImageUrl = nil
-    if PetsData and petName then
-        local success, petData = pcall(function()
-            return PetsData[petName]
-        end)
-        
-        if success and petData and petData.Images then
-            -- Determine image type based on shiny/mythic/xl status
-            local imageType = "Normal"
-            if shiny and mythic and xl then
-                imageType = "MythicShinyXL" -- Try combinations
-            elseif shiny and mythic then
-                imageType = "MythicShiny"
-            elseif mythic and xl then
-                imageType = "MythicXL"
-            elseif shiny and xl then
-                imageType = "ShinyXL"
-            elseif shiny then
-                imageType = "Shiny"
-            elseif mythic then
-                imageType = "Mythic"
-            elseif xl then
-                imageType = "XL"
-            end
-            
-            -- Get the image asset ID with cascading fallbacks
-            local petImageAsset = petData.Images[imageType]
-            
-            -- If exact combination not found, try simpler versions
-            if not petImageAsset then
-                if shiny and mythic then
-                    petImageAsset = petData.Images["MythicShiny"]
-                elseif shiny then
-                    petImageAsset = petData.Images["Shiny"]
-                elseif mythic then
-                    petImageAsset = petData.Images["Mythic"]
-                end
-            end
-            
-            -- Final fallback to Normal
-            petImageAsset = petImageAsset or petData.Images["Normal"]
-            
-            if petImageAsset then
-                -- Extract asset ID from rbxassetid:// format
-                local assetId = petImageAsset:match("rbxassetid://(%d+)")
-                
-                if assetId then
-                    -- Convert to Discord-compatible thumbnail URL
-                    petImageUrl = getThumbnailUrl(assetId)
-                end
-            end
-        end
-    end
+    -- Get pet image asset ID (non-blocking, no HTTP call)
+    local petImageAssetId = getPetImageAssetId(petName, shiny, mythic, xl)
     
     -- This function now just queues the notification with specified type and ping status
     -- The calling code (connectToEvents) determines notificationType and shouldPing
@@ -1213,7 +1175,7 @@ local function sendDiscordNotification(petName, shiny, mythic, xl, eggName, rari
             eggName = eggName,
             rarity = rarity,
             pet = pet,
-            petImageUrl = petImageUrl,
+            petImageAssetId = petImageAssetId, -- Store asset ID, fetch URL later
             isSpecial = true,
             isInfinity = isInfinity
         })
@@ -1236,7 +1198,7 @@ local function sendDiscordNotification(petName, shiny, mythic, xl, eggName, rari
             eggName = eggName,
             rarity = rarity,
             pet = pet,
-            petImageUrl = petImageUrl,
+            petImageAssetId = petImageAssetId, -- Store asset ID, fetch URL later
             isSpecial = false
         })
     end
@@ -1245,7 +1207,65 @@ local function sendDiscordNotification(petName, shiny, mythic, xl, eggName, rari
     processWebhookQueue()
 end
 
+-- Helper function to get pet image asset ID (optimized, non-blocking)
+local function getPetImageAssetId(petName, shiny, mythic, xl)
+    if not PetsData or not petName then
+        return nil
+    end
+    
+    local success, petData = pcall(function()
+        return PetsData[petName]
+    end)
+    
+    if not success or not petData or not petData.Images then
+        return nil
+    end
+    
+    -- Determine image type based on shiny/mythic/xl status
+    local imageType = "Normal"
+    if shiny and mythic and xl then
+        imageType = "MythicShinyXL"
+    elseif shiny and mythic then
+        imageType = "MythicShiny"
+    elseif mythic and xl then
+        imageType = "MythicXL"
+    elseif shiny and xl then
+        imageType = "ShinyXL"
+    elseif shiny then
+        imageType = "Shiny"
+    elseif mythic then
+        imageType = "Mythic"
+    elseif xl then
+        imageType = "XL"
+    end
+    
+    -- Get the image asset ID with cascading fallbacks
+    local petImageAsset = petData.Images[imageType]
+    
+    -- If exact combination not found, try simpler versions
+    if not petImageAsset then
+        if shiny and mythic then
+            petImageAsset = petData.Images["MythicShiny"]
+        elseif shiny then
+            petImageAsset = petData.Images["Shiny"]
+        elseif mythic then
+            petImageAsset = petData.Images["Mythic"]
+        end
+    end
+    
+    -- Final fallback to Normal
+    petImageAsset = petImageAsset or petData.Images["Normal"]
+    
+    if petImageAsset then
+        -- Extract asset ID from rbxassetid:// format
+        return petImageAsset:match("rbxassetid://(%d+)")
+    end
+    
+    return nil
+end
+
 -- NEW: Unified function to send pet notifications with explicit notification type and ping control
+-- OPTIMIZED: No longer blocks on thumbnail URL fetching - done lazily in queue processor
 local function sendPetNotification(petName, shiny, mythic, xl, eggName, rarity, pet, notificationType, shouldPing)
     -- Don't process if script is closed
     if not scriptActive then
@@ -1262,60 +1282,8 @@ local function sendPetNotification(petName, shiny, mythic, xl, eggName, rarity, 
         return
     end
     
-    -- Get pet image URL
-    local petImageUrl = nil
-    if PetsData and petName then
-        local success, petData = pcall(function()
-            return PetsData[petName]
-        end)
-        
-        if success and petData and petData.Images then
-            -- Determine image type based on shiny/mythic/xl status
-            local imageType = "Normal"
-            if shiny and mythic and xl then
-                imageType = "MythicShinyXL"
-            elseif shiny and mythic then
-                imageType = "MythicShiny"
-            elseif mythic and xl then
-                imageType = "MythicXL"
-            elseif shiny and xl then
-                imageType = "ShinyXL"
-            elseif shiny then
-                imageType = "Shiny"
-            elseif mythic then
-                imageType = "Mythic"
-            elseif xl then
-                imageType = "XL"
-            end
-            
-            -- Get the image asset ID with cascading fallbacks
-            local petImageAsset = petData.Images[imageType]
-            
-            -- If exact combination not found, try simpler versions
-            if not petImageAsset then
-                if shiny and mythic then
-                    petImageAsset = petData.Images["MythicShiny"]
-                elseif shiny then
-                    petImageAsset = petData.Images["Shiny"]
-                elseif mythic then
-                    petImageAsset = petData.Images["Mythic"]
-                end
-            end
-            
-            -- Final fallback to Normal
-            petImageAsset = petImageAsset or petData.Images["Normal"]
-            
-            if petImageAsset then
-                -- Extract asset ID from rbxassetid:// format
-                local assetId = petImageAsset:match("rbxassetid://(%d+)")
-                
-                if assetId then
-                    -- Convert to Discord-compatible thumbnail URL
-                    petImageUrl = getThumbnailUrl(assetId)
-                end
-            end
-        end
-    end
+    -- Get pet image asset ID (non-blocking, no HTTP call)
+    local petImageAssetId = getPetImageAssetId(petName, shiny, mythic, xl)
     
     -- Determine which notification to send based on notificationType
     if notificationType == "infinity" then
@@ -1330,7 +1298,7 @@ local function sendPetNotification(petName, shiny, mythic, xl, eggName, rarity, 
             eggName = eggName,
             rarity = rarity,
             pet = pet,
-            petImageUrl = petImageUrl,
+            petImageAssetId = petImageAssetId, -- Store asset ID, fetch URL later
             isSpecial = true,
             isInfinity = isInfinity,
             shouldPing = shouldPing
@@ -1354,7 +1322,7 @@ local function sendPetNotification(petName, shiny, mythic, xl, eggName, rarity, 
             eggName = eggName,
             rarity = rarity,
             pet = pet,
-            petImageUrl = petImageUrl,
+            petImageAssetId = petImageAssetId, -- Store asset ID, fetch URL later
             isSpecial = false,
             notificationType = "secret",
             shouldPing = shouldPing
@@ -1366,7 +1334,7 @@ local function sendPetNotification(petName, shiny, mythic, xl, eggName, rarity, 
             shiny = shiny,
             mythic = mythic,
             xl = xl,
-            petImageUrl = petImageUrl,
+            petImageAssetId = petImageAssetId, -- Store asset ID, fetch URL later
             notificationType = "xl",
             shouldPing = shouldPing
         })
@@ -1377,7 +1345,7 @@ local function sendPetNotification(petName, shiny, mythic, xl, eggName, rarity, 
             shiny = shiny,
             mythic = mythic,
             xl = xl,
-            petImageUrl = petImageUrl,
+            petImageAssetId = petImageAssetId, -- Store asset ID, fetch URL later
             notificationType = "legendary",
             shouldPing = shouldPing
         })
@@ -1421,21 +1389,15 @@ local function connectToEvents()
                             local shiny = pet.Shiny == true
                             local mythic = pet.Mythic == true
                             
-                            -- XL detection with multiple fallback methods (format uncertain)
-                            local xl = false
-                            if pet.XL == true then
-                                xl = true -- Check uppercase XL (most likely)
-                            elseif pet.xl == true then
-                                xl = true -- Check lowercase xl
-                            elseif pet.Xl == true then
-                                xl = true -- Check mixed case Xl
-                            elseif type(pet.XL) == "number" and pet.XL > 0 then
-                                xl = true -- Check if XL is a number value
-                            elseif petName and string.find(string.upper(petName), "XL") then
-                                xl = true -- Check if "XL" is in the pet name
-                            end
+                            -- XL detection with multiple fallback methods (optimized for most common case first)
+                            local xl = (pet.XL == true) -- Check uppercase XL (most likely case)
+                                or (pet.xl == true) -- Check lowercase xl
+                                or (pet.Xl == true) -- Check mixed case Xl
+                                or (type(pet.XL) == "number" and pet.XL > 0) -- Check if XL is a number value
+                                or (petName and string.find(string.upper(petName), "XL", 1, true) ~= nil) -- Check if "XL" is in the pet name (optimized search)
                             
-                            if petName and ItemUtil then
+                            -- Only process if detection is enabled and pet data is available
+                            if petName and ItemUtil and (secretDetectionEnabled or xlDetectionEnabled or legendaryDetectionEnabled) then
                                 local rarity = ItemUtil:GetRarity(pet)
                                 
                                 -- Check pet characteristics
