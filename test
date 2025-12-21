@@ -48,6 +48,7 @@ local webhookURL = ""
 local discordUserID = ""
 local riftDetectionEnabled = false
 local playerTrackingEnabled = true -- Default to ON
+local eggCountMonitoringEnabled = true -- Default to ON
 
 -- Granular Secret Detection Settings (cascading logic)
 local secretNotifyNormal = true -- Default ON
@@ -123,6 +124,9 @@ local function loadSettings()
                     end
                     if decoded.playerTrackingEnabled ~= nil then
                         playerTrackingEnabled = decoded.playerTrackingEnabled
+                    end
+                    if decoded.eggCountMonitoringEnabled ~= nil then
+                        eggCountMonitoringEnabled = decoded.eggCountMonitoringEnabled
                     end
                     -- Load granular secret detection settings
                     if decoded.secretNotifyNormal ~= nil then
@@ -210,6 +214,7 @@ local function saveSettings()
             -- Save toggle states
             riftDetectionEnabled = riftDetectionEnabled,
             playerTrackingEnabled = playerTrackingEnabled,
+            eggCountMonitoringEnabled = eggCountMonitoringEnabled,
             -- Save granular secret detection settings
             secretNotifyNormal = secretNotifyNormal,
             secretNotifyShiny = secretNotifyShiny,
@@ -1942,18 +1947,38 @@ local hasStoppedHatching = false -- Track if we've already sent "stopped hatchin
 local function startEggCountMonitoring()
     spawn(function()
         while scriptActive do
-            if webhookURL ~= "" then
+            -- Only run if enabled and webhook is configured
+            if eggCountMonitoringEnabled and webhookURL ~= "" then
                 -- Calculate time until next :X0 minute
                 local currentTime = os.date("*t")
-                local minutesUntilNextCheck = 10 - (currentTime.min % 10)
-                if minutesUntilNextCheck == 10 then
+                local currentMinute = currentTime.min
+                local currentSecond = currentTime.sec
+                
+                -- Calculate minutes until next :X0 (0, 10, 20, 30, 40, 50)
+                local minutesUntilNextCheck = 10 - (currentMinute % 10)
+                
+                -- Handle edge case: if we're exactly at :X0, wait 10 minutes
+                if minutesUntilNextCheck == 10 and currentSecond == 0 then
+                    minutesUntilNextCheck = 10
+                elseif minutesUntilNextCheck == 10 then
                     minutesUntilNextCheck = 0
                 end
-                local secondsUntilNextCheck = (minutesUntilNextCheck * 60) - currentTime.sec
                 
-                -- Wait until next check time
-                if secondsUntilNextCheck > 0 then
-                    task.wait(secondsUntilNextCheck)
+                -- Calculate total seconds until next check
+                local secondsUntilNextCheck = (minutesUntilNextCheck * 60) - currentSecond
+                
+                -- Ensure we always wait at least 1 second to prevent instant loops
+                if secondsUntilNextCheck <= 0 then
+                    secondsUntilNextCheck = 600 -- Wait 10 minutes if calculation fails
+                end
+                
+                -- Wait until next check time (max 10 minutes)
+                task.wait(math.min(secondsUntilNextCheck, 600))
+                
+                -- Double-check if still enabled after waiting
+                if not eggCountMonitoringEnabled or webhookURL == "" or not scriptActive then
+                    task.wait(60) -- Wait before checking again
+                    continue
                 end
                 
                 -- Get current egg count
@@ -2014,7 +2039,8 @@ local function startEggCountMonitoring()
                     lastEggCount = currentEggCount -- Update count
                 end
             else
-                task.wait(60) -- Check every minute if webhook not configured
+                -- Not enabled or no webhook - check every minute
+                task.wait(60)
             end
         end
     end)
@@ -2528,6 +2554,30 @@ riftDesc.TextYAlignment = Enum.TextYAlignment.Top
 riftDesc.TextWrapped = true
 riftDesc.Parent = extraContent
 
+-- Egg count monitoring button (top-right)
+local eggMonitorBtn = Instance.new("TextButton")
+eggMonitorBtn.Size = UDim2.new(0, 155, 0, 28)
+eggMonitorBtn.Position = UDim2.new(0, 180, 0, 50)
+eggMonitorBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+eggMonitorBtn.Text = "Egg Monitor: ON"
+eggMonitorBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+eggMonitorBtn.TextSize = 11
+eggMonitorBtn.Font = Enum.Font.GothamBold
+eggMonitorBtn.BorderSizePixel = 0
+eggMonitorBtn.Parent = extraContent
+
+local eggMonitorDesc = Instance.new("TextLabel")
+eggMonitorDesc.Size = UDim2.new(0, 155, 0, 22)
+eggMonitorDesc.Position = UDim2.new(0, 180, 0, 82)
+eggMonitorDesc.BackgroundTransparency = 1
+eggMonitorDesc.Text = "Monitors egg count every 10min, notifies hourly"
+eggMonitorDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
+eggMonitorDesc.TextSize = 8
+eggMonitorDesc.Font = Enum.Font.Gotham
+eggMonitorDesc.TextXAlignment = Enum.TextXAlignment.Left
+eggMonitorDesc.TextYAlignment = Enum.TextYAlignment.Top
+eggMonitorDesc.TextWrapped = true
+eggMonitorDesc.Parent = extraContent
 
 -- Row 2: Player Tracking (left) and Close Script (right)
 -- Player tracking button (bottom-left)
@@ -2858,6 +2908,23 @@ riftBtn.Activated:Connect(function()
     else
         riftBtn.Text = "Rift Detection: OFF"
         riftBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    end
+    
+    saveSettings()
+end)
+
+-- Egg count monitoring toggle
+eggMonitorBtn.Activated:Connect(function()
+    if not scriptActive then return end
+    
+    eggCountMonitoringEnabled = not eggCountMonitoringEnabled
+    
+    if eggCountMonitoringEnabled then
+        eggMonitorBtn.Text = "Egg Monitor: ON"
+        eggMonitorBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+    else
+        eggMonitorBtn.Text = "Egg Monitor: OFF"
+        eggMonitorBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
     end
     
     saveSettings()
@@ -3379,6 +3446,15 @@ spawn(function()
     else
         playerBtn.Text = "Player Track: OFF"
         playerBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    end
+    
+    -- Update egg count monitoring button
+    if eggCountMonitoringEnabled then
+        eggMonitorBtn.Text = "Egg Monitor: ON"
+        eggMonitorBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+    else
+        eggMonitorBtn.Text = "Egg Monitor: OFF"
+        eggMonitorBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
     end
     
     -- Update XL detection buttons
