@@ -49,6 +49,7 @@ local discordUserID = ""
 local riftDetectionEnabled = false
 local playerTrackingEnabled = true -- Default to ON
 local eggCountMonitoringEnabled = true -- Default to ON
+local eggMonitorIntervalHours = 1 -- Default: 1 hour (options: 1, 2, 3, 4, 6, 12)
 
 -- Granular Secret Detection Settings (cascading logic)
 local secretNotifyNormal = true -- Default ON
@@ -93,6 +94,8 @@ local adminAbuseSecretSettings = {
 	filterUnder1B = false
 }
 local adminAbuseHatchedPets = {} -- Tracks all secrets/infinities during admin abuse
+local adminAbuseStartTime = nil -- Track when admin abuse started
+local adminAbuseStartEggCount = nil -- Track eggs at start of admin abuse
 
 -- Script start time for runtime calculation
 local scriptStartTime = os.time()
@@ -127,6 +130,9 @@ local function loadSettings()
                     end
                     if decoded.eggCountMonitoringEnabled ~= nil then
                         eggCountMonitoringEnabled = decoded.eggCountMonitoringEnabled
+                    end
+                    if decoded.eggMonitorIntervalHours and type(decoded.eggMonitorIntervalHours) == "number" then
+                        eggMonitorIntervalHours = decoded.eggMonitorIntervalHours
                     end
                     -- Load granular secret detection settings
                     if decoded.secretNotifyNormal ~= nil then
@@ -215,6 +221,7 @@ local function saveSettings()
             riftDetectionEnabled = riftDetectionEnabled,
             playerTrackingEnabled = playerTrackingEnabled,
             eggCountMonitoringEnabled = eggCountMonitoringEnabled,
+            eggMonitorIntervalHours = eggMonitorIntervalHours,
             -- Save granular secret detection settings
             secretNotifyNormal = secretNotifyNormal,
             secretNotifyShiny = secretNotifyShiny,
@@ -1533,7 +1540,27 @@ local function sendAdminAbuseSummary()
             shouldPing = false
         })
         processWebhookQueue()
+        
+        -- Reset tracking variables
+        adminAbuseStartTime = nil
+        adminAbuseStartEggCount = nil
         return
+    end
+    
+    -- Get player name
+    local playerName = p.Name or "Unknown Player"
+    
+    -- Calculate eggs hatched during admin abuse
+    local currentEggCount = getTotalEggsHatched()
+    local eggsHatchedDuringAbuse = 0
+    if adminAbuseStartEggCount and currentEggCount then
+        eggsHatchedDuringAbuse = currentEggCount - adminAbuseStartEggCount
+    end
+    
+    -- Calculate time elapsed
+    local timeElapsed = 0
+    if adminAbuseStartTime then
+        timeElapsed = os.time() - adminAbuseStartTime
     end
     
     -- Sort pets by hierarchy and rarity
@@ -1600,23 +1627,72 @@ local function sendAdminAbuseSummary()
         return a.rarity > b.rarity
     end)
     
-    -- Build description
+    -- Build description with pet list
     local description = ""
     for _, data in ipairs(petList) do
         description = description .. data.count .. "x " .. data.name .. "\n"
+    end
+    
+    -- Add spacing before stats
+    description = description .. "\n"
+    
+    -- Add eggs hatched during abuse
+    if eggsHatchedDuringAbuse > 0 then
+        local formattedEggs = eggsHatchedDuringAbuse
+        if FormatCommas then
+            formattedEggs = FormatCommas(eggsHatchedDuringAbuse)
+        else
+            formattedEggs = tostring(eggsHatchedDuringAbuse):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
+        end
+        description = description .. "**Eggs Hatched:** " .. formattedEggs .. "\n"
+    end
+    
+    -- Calculate and add eggs per secret
+    local totalSecrets = #adminAbuseHatchedPets
+    if eggsHatchedDuringAbuse > 0 and totalSecrets > 0 then
+        local eggsPerSecret = math.floor(eggsHatchedDuringAbuse / totalSecrets)
+        local formattedRate = eggsPerSecret
+        if FormatCommas then
+            formattedRate = FormatCommas(eggsPerSecret)
+        else
+            formattedRate = tostring(eggsPerSecret):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
+        end
+        description = description .. "**1 secret per " .. formattedRate .. " eggs**\n"
+    end
+    
+    -- Calculate and add time per secret
+    if timeElapsed > 0 and totalSecrets > 0 then
+        local secondsPerSecret = timeElapsed / totalSecrets
+        local timeStr = ""
+        
+        if secondsPerSecret >= 60 then
+            local minutes = math.floor(secondsPerSecret / 60)
+            local seconds = math.floor(secondsPerSecret % 60)
+            if minutes > 0 and seconds > 0 then
+                timeStr = string.format("%dm %ds", minutes, seconds)
+            elseif minutes > 0 then
+                timeStr = string.format("%dm", minutes)
+            else
+                timeStr = string.format("%ds", seconds)
+            end
+        else
+            timeStr = string.format("%ds", math.floor(secondsPerSecret))
+        end
+        
+        description = description .. "**1 secret per " .. timeStr .. "**"
     end
     
     -- Determine embed color (rarest pet's color)
     local rarestPet = petList[1]
     local embedColor = getEmbedColor(rarestPet.shiny, rarestPet.mythic, rarestPet.xl, rarestPet.isInfinity)
     
-    -- Build embed
+    -- Build embed with party popper emoji
     local embed = {
-        title = "📊 Admin Abuse Summary",
+        title = "🎉 " .. playerName .. "'s Admin Abuse Summary! 🎉",
         description = description,
         color = embedColor,
         footer = {
-            text = "Total: " .. #adminAbuseHatchedPets .. " secrets/infinities"
+            text = "Total: " .. totalSecrets .. " secrets/infinities"
         },
         timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
     }
@@ -1632,8 +1708,10 @@ local function sendAdminAbuseSummary()
     })
     processWebhookQueue()
     
-    -- Clear the tracking table
+    -- Clear the tracking table and reset variables
     adminAbuseHatchedPets = {}
+    adminAbuseStartTime = nil
+    adminAbuseStartEggCount = nil
 end
 
 -- Connect to HatchEgg event
@@ -1805,13 +1883,17 @@ local function connectToEvents()
                                                     local hasEnabledVariant = false
                                                     
                                                     -- Check if pet has any variant that is enabled for notifications
+                                                    -- Must check both: pet HAS the variant AND setting is enabled
                                                     if xl and activeSettings.notifyXL then
                                                         hasEnabledVariant = true
-                                                    elseif shiny and mythic and activeSettings.notifyShinyMythic then
+                                                    elseif (shiny and mythic) and activeSettings.notifyShinyMythic then
                                                         hasEnabledVariant = true
                                                     elseif mythic and activeSettings.notifyMythic then
                                                         hasEnabledVariant = true
                                                     elseif shiny and activeSettings.notifyShiny then
+                                                        hasEnabledVariant = true
+                                                    elseif (not shiny and not mythic and not xl) and activeSettings.notifyNormal then
+                                                        -- Normal pet (no variants) with Normal enabled
                                                         hasEnabledVariant = true
                                                     end
                                                     
@@ -1946,6 +2028,8 @@ local lastHourlyEggCount = nil -- Eggs at last hourly notification
 local firstCheckTime = nil -- Time of first check
 local lastHourNotified = nil -- Which hour we last sent a message for (0-23)
 local hasStoppedHatching = false -- Track if we've already sent "stopped hatching" message
+local hourlyEggHistory = {} -- Track egg counts: {timestamp = count}
+local hoursCountedSinceLastNotif = 0 -- Track how many hours since last notification
 local function startEggCountMonitoring()
     spawn(function()
         while scriptActive do
@@ -2011,52 +2095,99 @@ local function startEggCountMonitoring()
                     lastEggCount = currentEggCount
                     hasStoppedHatching = false -- Reset flag since they're hatching again
                     
-                    -- Check if we're at the top of the hour (:00) and should send hourly message
+                    -- Check if we're at the top of the hour (:00) and should send message based on interval
                     local currentTime = os.date("*t")
                     if currentTime.min == 0 and lastHourlyEggCount ~= nil then
                         local currentHour = currentTime.hour
                         
-                        -- Only send if we haven't sent a message for this hour yet
+                        -- Only process if we haven't processed this hour yet
                         if lastHourNotified ~= currentHour then
-                            -- Calculate eggs hatched since last hourly notification
-                            local eggsInPeriod = currentEggCount - lastHourlyEggCount
+                            -- Store current egg count in history with timestamp key
+                            local hourTimestamp = math.floor(os.time() / 3600) -- Hours since epoch
+                            hourlyEggHistory[hourTimestamp] = currentEggCount
                             
-                            -- Calculate actual minutes in period
-                            local minutesInPeriod = 60
-                            if lastHourNotified == nil and firstCheckTime ~= nil then
-                                -- First hourly message - calculate actual elapsed time
-                                minutesInPeriod = math.floor((os.time() - firstCheckTime) / 60)
+                            -- Clean old entries (keep last 150 hours = ~6 days)
+                            for timestamp, _ in pairs(hourlyEggHistory) do
+                                if hourTimestamp - timestamp > 150 then
+                                    hourlyEggHistory[timestamp] = nil
+                                end
                             end
                             
-                            -- Format numbers
-                            local formattedTotal = currentEggCount
-                            local formattedPeriod = eggsInPeriod
-                            if FormatCommas then
-                                formattedTotal = FormatCommas(currentEggCount)
-                                formattedPeriod = FormatCommas(eggsInPeriod)
-                            else
-                                formattedTotal = tostring(currentEggCount):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
-                                formattedPeriod = tostring(eggsInPeriod):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
+                            -- Increment hour counter
+                            hoursCountedSinceLastNotif = hoursCountedSinceLastNotif + 1
+                            
+                            -- Check if we should send a notification based on interval
+                            if hoursCountedSinceLastNotif >= eggMonitorIntervalHours then
+                                -- Calculate eggs hatched since last notification
+                                local eggsInPeriod = currentEggCount - lastHourlyEggCount
+                                
+                                -- Calculate actual time in period
+                                local timeInPeriod = eggMonitorIntervalHours * 60 -- minutes
+                                if lastHourNotified == nil and firstCheckTime ~= nil then
+                                    -- First notification - calculate actual elapsed time
+                                    timeInPeriod = math.floor((os.time() - firstCheckTime) / 60)
+                                end
+                                
+                                -- Format numbers
+                                local formattedTotal = currentEggCount
+                                local formattedPeriod = eggsInPeriod
+                                if FormatCommas then
+                                    formattedTotal = FormatCommas(currentEggCount)
+                                    formattedPeriod = FormatCommas(eggsInPeriod)
+                                else
+                                    formattedTotal = tostring(currentEggCount):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
+                                    formattedPeriod = tostring(eggsInPeriod):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
+                                end
+                                
+                                -- Build base message with appropriate time unit
+                                local timeUnit = timeInPeriod >= 60 and "hours" or "minutes"
+                                local timeValue = timeInPeriod >= 60 and (timeInPeriod / 60) or timeInPeriod
+                                
+                                local message = string.format(
+                                    "%s is still hatching.\nTotal Hatched: %s\nEggs hatched in the last %d %s: %s",
+                                    p.Name,
+                                    formattedTotal,
+                                    timeValue,
+                                    timeUnit,
+                                    formattedPeriod
+                                )
+                                
+                                -- Add rolling totals for every 12 hours if we have enough data
+                                -- Skip if the user's interval is 12h to avoid duplicate
+                                local currentHourTimestamp = math.floor(os.time() / 3600)
+                                for multipleOf12 = 12, 120, 12 do -- Up to 120 hours (5 days)
+                                    -- Skip this interval if it matches user's setting (avoid duplicate)
+                                    if eggMonitorIntervalHours ~= multipleOf12 then
+                                        -- Look for egg count from X hours ago
+                                        local timestampXHoursAgo = currentHourTimestamp - multipleOf12
+                                        local eggCountXHoursAgo = hourlyEggHistory[timestampXHoursAgo]
+                                        
+                                        if eggCountXHoursAgo then
+                                            local eggsInLastXHours = currentEggCount - eggCountXHoursAgo
+                                            local formattedXHours = eggsInLastXHours
+                                            if FormatCommas then
+                                                formattedXHours = FormatCommas(eggsInLastXHours)
+                                            else
+                                                formattedXHours = tostring(eggsInLastXHours):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
+                                            end
+                                            message = message .. string.format("\nEggs hatched in the last %d hours: %s", multipleOf12, formattedXHours)
+                                        end
+                                    end
+                                end
+                                
+                                table.insert(webhookQueue, {
+                                    message = message,
+                                    isPlainText = true,
+                                    shouldPing = false
+                                })
+                                processWebhookQueue()
+                                
+                                -- Reset counter and update tracking
+                                hoursCountedSinceLastNotif = 0
+                                lastHourlyEggCount = currentEggCount
                             end
                             
-                            -- Build message
-                            local message = string.format(
-                                "%s is still hatching.\n\nTotal Hatched: %s\n\nEggs hatched in the last %d minutes: %s",
-                                p.Name,
-                                formattedTotal,
-                                minutesInPeriod,
-                                formattedPeriod
-                            )
-                            
-                            table.insert(webhookQueue, {
-                                message = message,
-                                isPlainText = true,
-                                shouldPing = false
-                            })
-                            processWebhookQueue()
-                            
-                            -- Update tracking
-                            lastHourlyEggCount = currentEggCount
+                            -- Always update lastHourNotified to prevent reprocessing same hour
                             lastHourNotified = currentHour
                         end
                     end
@@ -2560,39 +2691,14 @@ extraTitle.BorderSizePixel = 0
 extraTitle.Parent = extraContent
 
 -- 2x2 Button grid in Extra tab
--- Row 1: Rift Detection (left) and Hourly Status (right)
--- Row 2: Player Tracking (left) and Close Script (right)
+-- Row 1: Egg Monitor (left) and Notification Interval (right)
+-- Row 2: Rift Detection (left) and Player Tracking (right)
+-- Row 3: Close Script button (full width at bottom)
 
--- Row 1: Rift Detection (left) and Hourly Status (right)
--- Rift detection button (top-left)
-local riftBtn = Instance.new("TextButton")
-riftBtn.Size = UDim2.new(0, 155, 0, 28)
-riftBtn.Position = UDim2.new(0, 15, 0, 50)
-riftBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-riftBtn.Text = "Rift Detection: OFF"
-riftBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-riftBtn.TextSize = 11
-riftBtn.Font = Enum.Font.GothamBold
-riftBtn.BorderSizePixel = 0
-riftBtn.Parent = extraContent
-
-local riftDesc = Instance.new("TextLabel")
-riftDesc.Size = UDim2.new(0, 155, 0, 22)
-riftDesc.Position = UDim2.new(0, 15, 0, 82)
-riftDesc.BackgroundTransparency = 1
-riftDesc.Text = "Detects Christmas Chest Rifts and pings you"
-riftDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
-riftDesc.TextSize = 8
-riftDesc.Font = Enum.Font.Gotham
-riftDesc.TextXAlignment = Enum.TextXAlignment.Left
-riftDesc.TextYAlignment = Enum.TextYAlignment.Top
-riftDesc.TextWrapped = true
-riftDesc.Parent = extraContent
-
--- Egg count monitoring button (top-right)
+-- Egg count monitoring button (top-left)
 local eggMonitorBtn = Instance.new("TextButton")
 eggMonitorBtn.Size = UDim2.new(0, 155, 0, 28)
-eggMonitorBtn.Position = UDim2.new(0, 180, 0, 50)
+eggMonitorBtn.Position = UDim2.new(0, 15, 0, 50)
 eggMonitorBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
 eggMonitorBtn.Text = "Egg Monitor: ON"
 eggMonitorBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -2603,9 +2709,9 @@ eggMonitorBtn.Parent = extraContent
 
 local eggMonitorDesc = Instance.new("TextLabel")
 eggMonitorDesc.Size = UDim2.new(0, 155, 0, 22)
-eggMonitorDesc.Position = UDim2.new(0, 180, 0, 82)
+eggMonitorDesc.Position = UDim2.new(0, 15, 0, 82)
 eggMonitorDesc.BackgroundTransparency = 1
-eggMonitorDesc.Text = "Monitors egg count every 10min, notifies hourly"
+eggMonitorDesc.Text = "Monitors egg count every 10min"
 eggMonitorDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
 eggMonitorDesc.TextSize = 8
 eggMonitorDesc.Font = Enum.Font.Gotham
@@ -2614,11 +2720,60 @@ eggMonitorDesc.TextYAlignment = Enum.TextYAlignment.Top
 eggMonitorDesc.TextWrapped = true
 eggMonitorDesc.Parent = extraContent
 
--- Row 2: Player Tracking (left) and Close Script (right)
--- Player tracking button (bottom-left)
+-- Notification interval button (top-right)
+local intervalBtn = Instance.new("TextButton")
+intervalBtn.Size = UDim2.new(0, 155, 0, 28)
+intervalBtn.Position = UDim2.new(0, 180, 0, 50)
+intervalBtn.BackgroundColor3 = Color3.fromRGB(100, 150, 255)
+intervalBtn.Text = "Interval: 1 Hour"
+intervalBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+intervalBtn.TextSize = 11
+intervalBtn.Font = Enum.Font.GothamBold
+intervalBtn.BorderSizePixel = 0
+intervalBtn.Parent = extraContent
+
+local intervalDesc = Instance.new("TextLabel")
+intervalDesc.Size = UDim2.new(0, 155, 0, 22)
+intervalDesc.Position = UDim2.new(0, 180, 0, 82)
+intervalDesc.BackgroundTransparency = 1
+intervalDesc.Text = "1h / 2h / 3h / 4h / 6h / 12h"
+intervalDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
+intervalDesc.TextSize = 8
+intervalDesc.Font = Enum.Font.Gotham
+intervalDesc.TextXAlignment = Enum.TextXAlignment.Left
+intervalDesc.TextYAlignment = Enum.TextYAlignment.Top
+intervalDesc.TextWrapped = true
+intervalDesc.Parent = extraContent
+
+-- Rift detection button (middle-left)
+local riftBtn = Instance.new("TextButton")
+riftBtn.Size = UDim2.new(0, 155, 0, 28)
+riftBtn.Position = UDim2.new(0, 15, 0, 110)
+riftBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+riftBtn.Text = "Rift Detection: OFF"
+riftBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+riftBtn.TextSize = 11
+riftBtn.Font = Enum.Font.GothamBold
+riftBtn.BorderSizePixel = 0
+riftBtn.Parent = extraContent
+
+local riftDesc = Instance.new("TextLabel")
+riftDesc.Size = UDim2.new(0, 155, 0, 22)
+riftDesc.Position = UDim2.new(0, 15, 0, 142)
+riftDesc.BackgroundTransparency = 1
+riftDesc.Text = "Detects Christmas Chest Rifts and pings you"
+riftDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
+riftDesc.TextSize = 8
+riftDesc.Font = Enum.Font.Gotham
+riftDesc.TextXAlignment = Enum.TextXAlignment.Left
+riftDesc.TextYAlignment = Enum.TextYAlignment.Top
+riftDesc.TextWrapped = true
+riftDesc.Parent = extraContent
+
+-- Player tracking button (middle-right)
 local playerBtn = Instance.new("TextButton")
 playerBtn.Size = UDim2.new(0, 155, 0, 28)
-playerBtn.Position = UDim2.new(0, 15, 0, 110)
+playerBtn.Position = UDim2.new(0, 180, 0, 110)
 playerBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
 playerBtn.Text = "Player Track: ON"
 playerBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -2629,7 +2784,7 @@ playerBtn.Parent = extraContent
 
 local playerDesc = Instance.new("TextLabel")
 playerDesc.Size = UDim2.new(0, 155, 0, 22)
-playerDesc.Position = UDim2.new(0, 15, 0, 142)
+playerDesc.Position = UDim2.new(0, 180, 0, 142)
 playerDesc.BackgroundTransparency = 1
 playerDesc.Text = "Notifies when players join or leave (no ping)"
 playerDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
@@ -2640,27 +2795,27 @@ playerDesc.TextYAlignment = Enum.TextYAlignment.Top
 playerDesc.TextWrapped = true
 playerDesc.Parent = extraContent
 
--- Close Script button (bottom-right)
+-- Close Script button (bottom, full width)
 local closeScriptBtn = Instance.new("TextButton")
-closeScriptBtn.Size = UDim2.new(0, 155, 0, 28)
-closeScriptBtn.Position = UDim2.new(0, 180, 0, 110)
+closeScriptBtn.Size = UDim2.new(0, 320, 0, 35)
+closeScriptBtn.Position = UDim2.new(0, 15, 0, 180)
 closeScriptBtn.BackgroundColor3 = Color3.fromRGB(80, 40, 40)
 closeScriptBtn.Text = "Close Script"
 closeScriptBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-closeScriptBtn.TextSize = 11
+closeScriptBtn.TextSize = 13
 closeScriptBtn.Font = Enum.Font.GothamBold
 closeScriptBtn.BorderSizePixel = 0
 closeScriptBtn.Parent = extraContent
 
 local closeScriptDesc = Instance.new("TextLabel")
-closeScriptDesc.Size = UDim2.new(0, 155, 0, 22)
-closeScriptDesc.Position = UDim2.new(0, 180, 0, 142)
+closeScriptDesc.Size = UDim2.new(0, 320, 0, 18)
+closeScriptDesc.Position = UDim2.new(0, 15, 0, 220)
 closeScriptDesc.BackgroundTransparency = 1
 closeScriptDesc.Text = "Stop all script functionality"
 closeScriptDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
 closeScriptDesc.TextSize = 8
 closeScriptDesc.Font = Enum.Font.Gotham
-closeScriptDesc.TextXAlignment = Enum.TextXAlignment.Left
+closeScriptDesc.TextXAlignment = Enum.TextXAlignment.Center
 closeScriptDesc.TextYAlignment = Enum.TextYAlignment.Top
 closeScriptDesc.TextWrapped = true
 closeScriptDesc.Parent = extraContent
@@ -2965,6 +3120,38 @@ eggMonitorBtn.Activated:Connect(function()
     saveSettings()
 end)
 
+-- Notification interval toggle (cycles through 1, 2, 3, 4, 6, 12 hours)
+intervalBtn.Activated:Connect(function()
+    if not scriptActive then return end
+    
+    -- Cycle through intervals: 1 → 2 → 3 → 4 → 6 → 12 → 1
+    local intervals = {1, 2, 3, 4, 6, 12}
+    local currentIndex = 1
+    for i, v in ipairs(intervals) do
+        if v == eggMonitorIntervalHours then
+            currentIndex = i
+            break
+        end
+    end
+    
+    -- Move to next interval
+    currentIndex = currentIndex + 1
+    if currentIndex > #intervals then
+        currentIndex = 1
+    end
+    
+    eggMonitorIntervalHours = intervals[currentIndex]
+    
+    -- Update button text
+    local hourText = eggMonitorIntervalHours == 1 and "Hour" or "Hours"
+    intervalBtn.Text = string.format("Interval: %d %s", eggMonitorIntervalHours, hourText)
+    
+    -- Reset the hour counter so next notification happens after the new interval
+    hoursCountedSinceLastNotif = 0
+    
+    saveSettings()
+end)
+
 
 -- Player tracking toggle
 playerBtn.Activated:Connect(function()
@@ -3175,6 +3362,8 @@ adminAbuseToggleBtn.Activated:Connect(function()
         -- Turn ON admin abuse mode
         adminAbuseActive = true
         adminAbuseHatchedPets = {} -- Reset tracking
+        adminAbuseStartTime = os.time() -- Record start time
+        adminAbuseStartEggCount = getTotalEggsHatched() -- Record starting egg count
         adminAbuseToggleBtn.Text = "Admin Abuse Mode: ON"
         adminAbuseToggleBtn.BackgroundColor3 = Color3.fromRGB(255, 200, 50)
         print(">>> ADMIN ABUSE MODE ACTIVATED <<<")
@@ -3491,6 +3680,10 @@ spawn(function()
         eggMonitorBtn.Text = "Egg Monitor: OFF"
         eggMonitorBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
     end
+    
+    -- Update notification interval button
+    local hourText = eggMonitorIntervalHours == 1 and "Hour" or "Hours"
+    intervalBtn.Text = string.format("Interval: %d %s", eggMonitorIntervalHours, hourText)
     
     -- Update XL detection buttons
     if xlDetectionEnabled then
