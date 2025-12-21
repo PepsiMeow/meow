@@ -1,5 +1,5 @@
 -- BUBBLEGUM SIMULATOR - AUTO HATCH & SECRET NOTIFIER
--- Version 3.0 with XL support, tab system, and extra features
+-- Version 4.0 - Granular detection, admin abuse mode, and egg count monitoring
 
 local P = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -18,7 +18,8 @@ local SPECIAL_PETS = {
     "Christmas Robot",
     "Rumblecon God",
     "The Leviathan",
-    "Sylently's Pet"
+    "Sylently's Pet",
+    "Giant Nert's Pufferfish"
     -- Add more pet names here as needed
 }
 
@@ -30,7 +31,7 @@ end
 
 print("========================================")
 print("BUBBLEGUM AUTO HATCH & NOTIFIER")
-print("Version: 3.0")
+print("Version: 4.0")
 print("========================================")
 
 -- Load required modules
@@ -46,16 +47,51 @@ local autoHatchEnabled = false
 local webhookURL = ""
 local discordUserID = ""
 local riftDetectionEnabled = false
-local hourlyStatusEnabled = true -- Default to ON
 local playerTrackingEnabled = true -- Default to ON
 
--- Pet Detection Settings
-local secretDetectionEnabled = true -- Default to ON
-local secretPingMode = 1 -- 1=ALL, 2=VARIANTS+INFINITY, 3=NONE
-local xlDetectionEnabled = false -- Default to OFF
-local xlPingEnabled = false -- Default to OFF
-local legendaryDetectionEnabled = false -- Default to OFF
-local legendaryPingEnabled = false -- Default to OFF
+-- Granular Secret Detection Settings (cascading logic)
+local secretNotifyNormal = true -- Default ON
+local secretNotifyShiny = false -- Default OFF
+local secretNotifyMythic = false -- Default OFF
+local secretNotifyShinyMythic = false -- Default OFF
+local secretNotifyXL = false -- Default OFF
+
+-- Granular Secret Ping Settings
+local secretPingNormal = false -- Default OFF
+local secretPingShiny = false -- Default OFF
+local secretPingMythic = false -- Default OFF
+local secretPingShinyMythic = false -- Default OFF
+local secretPingXL = false -- Default OFF
+
+-- Secret Rarity Filter
+local secretFilterUnder1B = false -- Default OFF (notify all rarities)
+
+-- Infinity Detection Settings
+local infinityNotifyEnabled = true -- Default ON
+local infinityPingEnabled = true -- Default ON
+
+-- XL and Legendary Detection Settings (non-secret)
+local xlDetectionEnabled = false -- Default OFF
+local xlPingEnabled = false -- Default OFF
+local legendaryDetectionEnabled = false -- Default OFF
+local legendaryPingEnabled = false -- Default OFF
+
+-- Admin Abuse Mode
+local adminAbuseActive = false
+local adminAbuseSecretSettings = {
+	notifyNormal = true,
+	notifyShiny = true,
+	notifyMythic = true,
+	notifyShinyMythic = true,
+	notifyXL = true,
+	pingNormal = false,
+	pingShiny = false,
+	pingMythic = false,
+	pingShinyMythic = true,
+	pingXL = true,
+	filterUnder1B = false
+}
+local adminAbuseHatchedPets = {} -- Tracks all secrets/infinities during admin abuse
 
 -- Script start time for runtime calculation
 local scriptStartTime = os.time()
@@ -85,19 +121,53 @@ local function loadSettings()
                     if decoded.riftDetectionEnabled ~= nil then
                         riftDetectionEnabled = decoded.riftDetectionEnabled
                     end
-                    if decoded.hourlyStatusEnabled ~= nil then
-                        hourlyStatusEnabled = decoded.hourlyStatusEnabled
-                    end
                     if decoded.playerTrackingEnabled ~= nil then
                         playerTrackingEnabled = decoded.playerTrackingEnabled
                     end
-                    -- Load pet detection settings
-                    if decoded.secretDetectionEnabled ~= nil then
-                        secretDetectionEnabled = decoded.secretDetectionEnabled
+                    -- Load granular secret detection settings
+                    if decoded.secretNotifyNormal ~= nil then
+                        secretNotifyNormal = decoded.secretNotifyNormal
                     end
-                    if decoded.secretPingMode and type(decoded.secretPingMode) == "number" then
-                        secretPingMode = decoded.secretPingMode
+                    if decoded.secretNotifyShiny ~= nil then
+                        secretNotifyShiny = decoded.secretNotifyShiny
                     end
+                    if decoded.secretNotifyMythic ~= nil then
+                        secretNotifyMythic = decoded.secretNotifyMythic
+                    end
+                    if decoded.secretNotifyShinyMythic ~= nil then
+                        secretNotifyShinyMythic = decoded.secretNotifyShinyMythic
+                    end
+                    if decoded.secretNotifyXL ~= nil then
+                        secretNotifyXL = decoded.secretNotifyXL
+                    end
+                    -- Load granular secret ping settings
+                    if decoded.secretPingNormal ~= nil then
+                        secretPingNormal = decoded.secretPingNormal
+                    end
+                    if decoded.secretPingShiny ~= nil then
+                        secretPingShiny = decoded.secretPingShiny
+                    end
+                    if decoded.secretPingMythic ~= nil then
+                        secretPingMythic = decoded.secretPingMythic
+                    end
+                    if decoded.secretPingShinyMythic ~= nil then
+                        secretPingShinyMythic = decoded.secretPingShinyMythic
+                    end
+                    if decoded.secretPingXL ~= nil then
+                        secretPingXL = decoded.secretPingXL
+                    end
+                    -- Load secret filter
+                    if decoded.secretFilterUnder1B ~= nil then
+                        secretFilterUnder1B = decoded.secretFilterUnder1B
+                    end
+                    -- Load infinity settings
+                    if decoded.infinityNotifyEnabled ~= nil then
+                        infinityNotifyEnabled = decoded.infinityNotifyEnabled
+                    end
+                    if decoded.infinityPingEnabled ~= nil then
+                        infinityPingEnabled = decoded.infinityPingEnabled
+                    end
+                    -- Load XL and Legendary settings
                     if decoded.xlDetectionEnabled ~= nil then
                         xlDetectionEnabled = decoded.xlDetectionEnabled
                     end
@@ -109,6 +179,10 @@ local function loadSettings()
                     end
                     if decoded.legendaryPingEnabled ~= nil then
                         legendaryPingEnabled = decoded.legendaryPingEnabled
+                    end
+                    -- Load admin abuse settings
+                    if decoded.adminAbuseSecretSettings and type(decoded.adminAbuseSecretSettings) == "table" then
+                        adminAbuseSecretSettings = decoded.adminAbuseSecretSettings
                     end
                     print("✓ Settings loaded from file")
                     return true
@@ -135,15 +209,31 @@ local function saveSettings()
             discordUserID = discordUserID or "",
             -- Save toggle states
             riftDetectionEnabled = riftDetectionEnabled,
-            hourlyStatusEnabled = hourlyStatusEnabled,
             playerTrackingEnabled = playerTrackingEnabled,
-            -- Save pet detection settings
-            secretDetectionEnabled = secretDetectionEnabled,
-            secretPingMode = secretPingMode,
+            -- Save granular secret detection settings
+            secretNotifyNormal = secretNotifyNormal,
+            secretNotifyShiny = secretNotifyShiny,
+            secretNotifyMythic = secretNotifyMythic,
+            secretNotifyShinyMythic = secretNotifyShinyMythic,
+            secretNotifyXL = secretNotifyXL,
+            -- Save granular secret ping settings
+            secretPingNormal = secretPingNormal,
+            secretPingShiny = secretPingShiny,
+            secretPingMythic = secretPingMythic,
+            secretPingShinyMythic = secretPingShinyMythic,
+            secretPingXL = secretPingXL,
+            -- Save secret filter
+            secretFilterUnder1B = secretFilterUnder1B,
+            -- Save infinity settings
+            infinityNotifyEnabled = infinityNotifyEnabled,
+            infinityPingEnabled = infinityPingEnabled,
+            -- Save XL and Legendary settings
             xlDetectionEnabled = xlDetectionEnabled,
             xlPingEnabled = xlPingEnabled,
             legendaryDetectionEnabled = legendaryDetectionEnabled,
-            legendaryPingEnabled = legendaryPingEnabled
+            legendaryPingEnabled = legendaryPingEnabled,
+            -- Save admin abuse settings
+            adminAbuseSecretSettings = adminAbuseSecretSettings
         }
         local json = HttpService:JSONEncode(settings)
         writefile(SETTINGS_FILE, json)
@@ -1019,7 +1109,35 @@ local function processWebhookQueue()
             local webhookData = table.remove(webhookQueue, 1)
             
             -- Check message type
-            if webhookData.isPlainText then
+            if webhookData.isCustomEmbed then
+                -- Custom embed (like admin abuse summary)
+                local maxRetries = 5
+                local retryCount = 0
+                local success = false
+                
+                while retryCount < maxRetries and not success do
+                    local jsonPayload = jsonEncode(webhookData.payload)
+                    local ok, response, status = httpLib(webhookURL, "POST", {
+                        ["Content-Type"] = "application/json"
+                    }, jsonPayload)
+                    
+                    success = ok and (status == 200 or status == 204)
+                    
+                    if not success and status == 429 then
+                        retryCount = retryCount + 1
+                        if retryCount < maxRetries then
+                            task.wait(1)
+                        end
+                    else
+                        break
+                    end
+                end
+                
+                if not success then
+                    table.insert(webhookQueue, 1, webhookData)
+                    messagesRemainingWithDelay = 5
+                end
+            elseif webhookData.isPlainText then
                 -- Plain text message
                 local maxRetries = 5
                 local retryCount = 0
@@ -1355,6 +1473,164 @@ local function sendPetNotification(petName, shiny, mythic, xl, eggName, rarity, 
     processWebhookQueue()
 end
 
+-- Helper function to calculate pet rarity number for sorting
+local function getPetRarityValue(pet)
+    if not PetUtil or not pet then
+        return 0
+    end
+    
+    local success, petChance = pcall(function()
+        return PetUtil:GetChance(pet)
+    end)
+    
+    if success and petChance and petChance > 0 then
+        return math.ceil(100 / petChance)
+    end
+    
+    return 0
+end
+
+-- Helper function to get variant hierarchy value
+local function getVariantHierarchy(shiny, mythic, xl)
+    if shiny and mythic and xl then return 8 end -- Shiny Mythic XL
+    if mythic and xl then return 7 end -- Mythic XL
+    if shiny and xl then return 6 end -- Shiny XL
+    if xl then return 5 end -- XL
+    if shiny and mythic then return 4 end -- Shiny Mythic
+    if mythic then return 3 end -- Mythic
+    if shiny then return 2 end -- Shiny
+    return 1 -- Normal
+end
+
+-- Helper function to get variant name
+local function getVariantName(shiny, mythic, xl)
+    local name = ""
+    if shiny and mythic then
+        name = "Shiny Mythic "
+    elseif shiny then
+        name = "Shiny "
+    elseif mythic then
+        name = "Mythic "
+    end
+    if xl then
+        name = name .. "XL "
+    end
+    return name
+end
+
+-- Admin Abuse Summary function
+local function sendAdminAbuseSummary()
+    if #adminAbuseHatchedPets == 0 then
+        -- No pets hatched during admin abuse
+        table.insert(webhookQueue, {
+            message = "Admin Abuse mode ended. No secrets or infinities were hatched.",
+            isPlainText = true,
+            shouldPing = false
+        })
+        processWebhookQueue()
+        return
+    end
+    
+    -- Sort pets by hierarchy and rarity
+    table.sort(adminAbuseHatchedPets, function(a, b)
+        -- First sort by infinity (infinities first)
+        if a.isInfinity and not b.isInfinity then return true end
+        if not a.isInfinity and b.isInfinity then return false end
+        
+        -- Then sort by variant hierarchy
+        local aHierarchy = getVariantHierarchy(a.shiny, a.mythic, a.xl)
+        local bHierarchy = getVariantHierarchy(b.shiny, b.mythic, b.xl)
+        if aHierarchy ~= bHierarchy then
+            return aHierarchy > bHierarchy
+        end
+        
+        -- Then sort by rarity (higher rarity first)
+        local aRarity = getPetRarityValue(a.pet)
+        local bRarity = getPetRarityValue(b.pet)
+        return aRarity > bRarity
+    end)
+    
+    -- Count pets by name and variant
+    local petCounts = {}
+    for _, petData in ipairs(adminAbuseHatchedPets) do
+        local variantName = getVariantName(petData.shiny, petData.mythic, petData.xl)
+        local fullName = variantName .. petData.name
+        
+        if not petCounts[fullName] then
+            petCounts[fullName] = {
+                count = 0,
+                rarity = getPetRarityValue(petData.pet),
+                hierarchy = getVariantHierarchy(petData.shiny, petData.mythic, petData.xl),
+                isInfinity = petData.isInfinity,
+                shiny = petData.shiny,
+                mythic = petData.mythic,
+                xl = petData.xl,
+                name = petData.name
+            }
+        end
+        petCounts[fullName].count = petCounts[fullName].count + 1
+    end
+    
+    -- Build list of pets
+    local petList = {}
+    for fullName, data in pairs(petCounts) do
+        table.insert(petList, {
+            name = fullName,
+            count = data.count,
+            rarity = data.rarity,
+            hierarchy = data.hierarchy,
+            isInfinity = data.isInfinity,
+            shiny = data.shiny,
+            mythic = data.mythic,
+            xl = data.xl,
+            baseName = data.name
+        })
+    end
+    
+    -- Sort the list
+    table.sort(petList, function(a, b)
+        if a.isInfinity and not b.isInfinity then return true end
+        if not a.isInfinity and b.isInfinity then return false end
+        if a.hierarchy ~= b.hierarchy then return a.hierarchy > b.hierarchy end
+        return a.rarity > b.rarity
+    end)
+    
+    -- Build description
+    local description = ""
+    for _, data in ipairs(petList) do
+        description = description .. data.count .. "x " .. data.name .. "\n"
+    end
+    
+    -- Determine embed color (rarest pet's color)
+    local rarestPet = petList[1]
+    local embedColor = getEmbedColor(rarestPet.shiny, rarestPet.mythic, rarestPet.xl, rarestPet.isInfinity)
+    
+    -- Build embed
+    local embed = {
+        title = "📊 Admin Abuse Summary",
+        description = description,
+        color = embedColor,
+        footer = {
+            text = "Total: " .. #adminAbuseHatchedPets .. " secrets/infinities"
+        },
+        timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+    }
+    
+    local payload = {
+        embeds = {embed}
+    }
+    
+    -- Send to webhook queue
+    table.insert(webhookQueue, {
+        isCustomEmbed = true,
+        payload = payload
+    })
+    processWebhookQueue()
+    
+    -- Clear the tracking table
+    adminAbuseHatchedPets = {}
+end
+
 -- Connect to HatchEgg event
 local function connectToEvents()
     if not Remote then
@@ -1397,77 +1673,181 @@ local function connectToEvents()
                                 or (petName and string.find(string.upper(petName), "XL", 1, true) ~= nil) -- Check if "XL" is in the pet name (optimized search)
                             
                             -- Only process if detection is enabled and pet data is available
-                            if petName and ItemUtil and (secretDetectionEnabled or xlDetectionEnabled or legendaryDetectionEnabled) then
+                            if petName and ItemUtil then
                                 local rarity = ItemUtil:GetRarity(pet)
                                 
                                 -- Check pet characteristics
                                 local isSpecial = isSpecialPet(petName)
                                 local isSecret = rarity == "Secret"
                                 local isLegendary = rarity == "Legendary"
-                                local isVariant = shiny or mythic or xl
                                 
-                                -- Determine notification type and whether to send based on detection settings
-                                local notificationType = nil
-                                local shouldSend = false
-                                
-                                -- Priority 1: Infinity pets (special pets, follows secret detection settings)
-                                if isSpecial then
-                                    if secretDetectionEnabled then
-                                        notificationType = "infinity"
-                                        shouldSend = true
-                                        print(">>> INFINITY PET DETECTED! <<<")
-                                    end
-                                -- Priority 2: Secret pets
-                                elseif isSecret then
-                                    if secretDetectionEnabled then
-                                        notificationType = "secret"
-                                        shouldSend = true
-                                        print(">>> SECRET DETECTED! <<<")
-                                    end
-                                -- Priority 3: XL pets (non-secret)
-                                elseif xl then
-                                    if xlDetectionEnabled or (isLegendary and legendaryDetectionEnabled) then
-                                        notificationType = "xl"
-                                        shouldSend = true
-                                        print(">>> XL PET DETECTED! <<<")
-                                    end
-                                -- Priority 4: Legendary pets (non-XL)
-                                elseif isLegendary then
-                                    if legendaryDetectionEnabled then
-                                        notificationType = "legendary"
-                                        shouldSend = true
-                                        print(">>> LEGENDARY DETECTED! <<<")
-                                    end
+                                -- Determine which settings to use (admin abuse or normal)
+                                local activeSettings = {}
+                                if adminAbuseActive then
+                                    activeSettings.notifyNormal = adminAbuseSecretSettings.notifyNormal
+                                    activeSettings.notifyShiny = adminAbuseSecretSettings.notifyShiny
+                                    activeSettings.notifyMythic = adminAbuseSecretSettings.notifyMythic
+                                    activeSettings.notifyShinyMythic = adminAbuseSecretSettings.notifyShinyMythic
+                                    activeSettings.notifyXL = adminAbuseSecretSettings.notifyXL
+                                    activeSettings.pingNormal = adminAbuseSecretSettings.pingNormal
+                                    activeSettings.pingShiny = adminAbuseSecretSettings.pingShiny
+                                    activeSettings.pingMythic = adminAbuseSecretSettings.pingMythic
+                                    activeSettings.pingShinyMythic = adminAbuseSecretSettings.pingShinyMythic
+                                    activeSettings.pingXL = adminAbuseSecretSettings.pingXL
+                                    activeSettings.filterUnder1B = adminAbuseSecretSettings.filterUnder1B
+                                    activeSettings.infinityNotify = adminAbuseSecretSettings.notifyInfinity or true
+                                    activeSettings.infinityPing = adminAbuseSecretSettings.pingInfinity or true
+                                else
+                                    activeSettings.notifyNormal = secretNotifyNormal
+                                    activeSettings.notifyShiny = secretNotifyShiny
+                                    activeSettings.notifyMythic = secretNotifyMythic
+                                    activeSettings.notifyShinyMythic = secretNotifyShinyMythic
+                                    activeSettings.notifyXL = secretNotifyXL
+                                    activeSettings.pingNormal = secretPingNormal
+                                    activeSettings.pingShiny = secretPingShiny
+                                    activeSettings.pingMythic = secretPingMythic
+                                    activeSettings.pingShinyMythic = secretPingShinyMythic
+                                    activeSettings.pingXL = secretPingXL
+                                    activeSettings.filterUnder1B = secretFilterUnder1B
+                                    activeSettings.infinityNotify = infinityNotifyEnabled
+                                    activeSettings.infinityPing = infinityPingEnabled
                                 end
                                 
-                                -- Determine ping status
-                                local shouldPing = false
+                                -- ===== DETECTION LOGIC =====
                                 
-                                if shouldSend then
-                                    -- Ping logic for Infinity/Secret pets
-                                    if isSpecial or isSecret then
-                                        if secretPingMode == 1 then
-                                            -- ALL: ping all secrets
+                                -- Priority 1: Infinity pets
+                                if isSpecial then
+                                    if activeSettings.infinityNotify then
+                                        local shouldPing = activeSettings.infinityPing
+                                        
+                                        -- Track for admin abuse summary
+                                        if adminAbuseActive then
+                                            table.insert(adminAbuseHatchedPets, {
+                                                name = petName,
+                                                shiny = shiny,
+                                                mythic = mythic,
+                                                xl = xl,
+                                                rarity = rarity,
+                                                isInfinity = true,
+                                                pet = pet
+                                            })
+                                        end
+                                        
+                                        sendPetNotification(petName, shiny, mythic, xl, eggName, rarity, pet, "infinity", shouldPing)
+                                        print(">>> INFINITY PET DETECTED! <<<")
+                                    end
+                                
+                                -- Priority 2: Secret pets (cascading variant logic)
+                                elseif isSecret then
+                                    local shouldNotify = false
+                                    local shouldPing = false
+                                    
+                                    -- Cascading detection logic
+                                    -- Check exact match first, then cascade
+                                    if shiny and mythic and xl then
+                                        -- Shiny Mythic XL: can be triggered by any of: Shiny, Mythic, Shiny Mythic, XL
+                                        shouldNotify = activeSettings.notifyShiny or activeSettings.notifyMythic or activeSettings.notifyShinyMythic or activeSettings.notifyXL
+                                        if activeSettings.pingShiny or activeSettings.pingMythic or activeSettings.pingShinyMythic or activeSettings.pingXL then
                                             shouldPing = true
-                                        elseif secretPingMode == 2 then
-                                            -- VARIANTS+INFINITY: ping variants or infinity
-                                            if isVariant or isSpecial then
-                                                shouldPing = true
+                                        end
+                                    elseif mythic and xl then
+                                        -- Mythic XL: can be triggered by Mythic or XL
+                                        shouldNotify = activeSettings.notifyMythic or activeSettings.notifyXL
+                                        if activeSettings.pingMythic or activeSettings.pingXL then
+                                            shouldPing = true
+                                        end
+                                    elseif shiny and xl then
+                                        -- Shiny XL: can be triggered by Shiny or XL
+                                        shouldNotify = activeSettings.notifyShiny or activeSettings.notifyXL
+                                        if activeSettings.pingShiny or activeSettings.pingXL then
+                                            shouldPing = true
+                                        end
+                                    elseif shiny and mythic then
+                                        -- Shiny Mythic: can be triggered by Shiny, Mythic, or Shiny Mythic
+                                        shouldNotify = activeSettings.notifyShiny or activeSettings.notifyMythic or activeSettings.notifyShinyMythic
+                                        if activeSettings.pingShiny or activeSettings.pingMythic or activeSettings.pingShinyMythic then
+                                            shouldPing = true
+                                        end
+                                    elseif xl then
+                                        -- XL: triggered by XL
+                                        shouldNotify = activeSettings.notifyXL
+                                        shouldPing = activeSettings.pingXL
+                                    elseif mythic then
+                                        -- Mythic: triggered by Mythic
+                                        shouldNotify = activeSettings.notifyMythic
+                                        shouldPing = activeSettings.pingMythic
+                                    elseif shiny then
+                                        -- Shiny: triggered by Shiny
+                                        shouldNotify = activeSettings.notifyShiny
+                                        shouldPing = activeSettings.pingShiny
+                                    else
+                                        -- Normal: triggered by Normal
+                                        shouldNotify = activeSettings.notifyNormal
+                                        shouldPing = activeSettings.pingNormal
+                                    end
+                                    
+                                    -- Apply <1B filter
+                                    if shouldNotify and activeSettings.filterUnder1B then
+                                        -- Check if pet is under 1B
+                                        if PetUtil and pet then
+                                            local success, petChance = pcall(function()
+                                                return PetUtil:GetChance(pet)
+                                            end)
+                                            if success and petChance and petChance > 0 then
+                                                local denominator = math.ceil(100 / petChance)
+                                                -- If under 1B, check if any variant is enabled that overrides the filter
+                                                if denominator < 1000000000 then
+                                                    local hasEnabledVariant = false
+                                                    
+                                                    -- Check if pet has any variant that is enabled for notifications
+                                                    if xl and activeSettings.notifyXL then
+                                                        hasEnabledVariant = true
+                                                    elseif shiny and mythic and activeSettings.notifyShinyMythic then
+                                                        hasEnabledVariant = true
+                                                    elseif mythic and activeSettings.notifyMythic then
+                                                        hasEnabledVariant = true
+                                                    elseif shiny and activeSettings.notifyShiny then
+                                                        hasEnabledVariant = true
+                                                    end
+                                                    
+                                                    -- If no enabled variant, skip notification
+                                                    if not hasEnabledVariant then
+                                                        shouldNotify = false
+                                                    end
+                                                end
                                             end
                                         end
-                                        -- Mode 3 (NONE): shouldPing stays false
                                     end
                                     
-                                    -- Additional ping overrides (accumulative)
-                                    if xl and xlPingEnabled then
-                                        shouldPing = true
-                                    end
-                                    if isLegendary and legendaryPingEnabled then
-                                        shouldPing = true
+                                    -- Track for admin abuse summary (always track, even if not notifying)
+                                    if adminAbuseActive then
+                                        table.insert(adminAbuseHatchedPets, {
+                                            name = petName,
+                                            shiny = shiny,
+                                            mythic = mythic,
+                                            xl = xl,
+                                            rarity = rarity,
+                                            isInfinity = false,
+                                            pet = pet
+                                        })
                                     end
                                     
-                                    -- Send notification with determined type and ping status
-                                    sendPetNotification(petName, shiny, mythic, xl, eggName, rarity, pet, notificationType, shouldPing)
+                                    if shouldNotify then
+                                        sendPetNotification(petName, shiny, mythic, xl, eggName, rarity, pet, "secret", shouldPing)
+                                        print(">>> SECRET DETECTED! <<<")
+                                    end
+                                
+                                -- Priority 3: XL pets (non-secret)
+                                elseif xl and xlDetectionEnabled then
+                                    local shouldPing = xlPingEnabled
+                                    sendPetNotification(petName, shiny, mythic, xl, eggName, rarity, pet, "xl", shouldPing)
+                                    print(">>> XL PET DETECTED! <<<")
+                                
+                                -- Priority 4: Legendary pets (non-XL, non-secret)
+                                elseif isLegendary and legendaryDetectionEnabled then
+                                    local shouldPing = legendaryPingEnabled
+                                    sendPetNotification(petName, shiny, mythic, xl, eggName, rarity, pet, "legendary", shouldPing)
+                                    print(">>> LEGENDARY DETECTED! <<<")
                                 end
                             end
                         end
@@ -1555,38 +1935,86 @@ local function setupChatMonitoring()
     end
 end
 
--- Hourly status messages (sends at top of each hour)
-local function startHourlyStatusMessages()
+-- Egg count monitoring system (checks every 10 minutes at :X0)
+local lastEggCount = nil
+local lastHourlyNotification = 0
+local hasStoppedHatching = false -- Track if we've already sent "stopped hatching" message
+local function startEggCountMonitoring()
     spawn(function()
         while scriptActive do
-            if hourlyStatusEnabled and webhookURL ~= "" then
-                -- Recalculate time until next hour each iteration
+            if webhookURL ~= "" then
+                -- Calculate time until next :X0 minute
                 local currentTime = os.date("*t")
-                local minutesUntilNextHour = 60 - currentTime.min
-                local secondsUntilNextHour = (minutesUntilNextHour * 60) - currentTime.sec
-                
-                -- Wait until top of the hour
-                task.wait(secondsUntilNextHour)
-                
-                -- Double-check conditions after waiting
-                if hourlyStatusEnabled and scriptActive and webhookURL ~= "" then
-                    local runtime = os.time() - scriptStartTime
-                    local hours = math.floor(runtime / 3600)
-                    local minutes = math.floor((runtime % 3600) / 60)
-                    
-                    local runtimeText = string.format("%dh %dm", hours, minutes)
-                    local message = string.format("%s is still in the server. Runtime: %s", p.Name, runtimeText)
-                    
-                    table.insert(webhookQueue, {
-                        message = message,
-                        isPlainText = true,
-                        shouldPing = false
-                    })
-                    processWebhookQueue()
+                local minutesUntilNextCheck = 10 - (currentTime.min % 10)
+                if minutesUntilNextCheck == 10 then
+                    minutesUntilNextCheck = 0
                 end
-                -- Loop continues and recalculates time for next hour
+                local secondsUntilNextCheck = (minutesUntilNextCheck * 60) - currentTime.sec
+                
+                -- Wait until next check time
+                if secondsUntilNextCheck > 0 then
+                    task.wait(secondsUntilNextCheck)
+                end
+                
+                -- Get current egg count
+                local currentEggCount = getTotalEggsHatched()
+                
+                if currentEggCount == nil then
+                    -- Failed to get egg count - treat as not hatching
+                    if lastEggCount ~= nil and not hasStoppedHatching then
+                        table.insert(webhookQueue, {
+                            message = string.format("%s is no longer hatching.", p.Name),
+                            isPlainText = true,
+                            shouldPing = false
+                        })
+                        processWebhookQueue()
+                        hasStoppedHatching = true
+                    end
+                    lastEggCount = nil
+                elseif lastEggCount == nil then
+                    -- First check - just record the count
+                    lastEggCount = currentEggCount
+                    lastHourlyNotification = os.time()
+                    hasStoppedHatching = false
+                elseif currentEggCount > lastEggCount then
+                    -- Eggs increased - player is still hatching
+                    lastEggCount = currentEggCount
+                    hasStoppedHatching = false -- Reset flag since they're hatching again
+                    
+                    -- Check if it's been at least 1 hour since last "still hatching" message
+                    local timeSinceLastNotif = os.time() - lastHourlyNotification
+                    if timeSinceLastNotif >= 3600 then
+                        -- Format egg count
+                        local formattedCount = currentEggCount
+                        if FormatCommas then
+                            formattedCount = FormatCommas(currentEggCount)
+                        else
+                            formattedCount = tostring(currentEggCount):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
+                        end
+                        
+                        table.insert(webhookQueue, {
+                            message = string.format("%s is still hatching. Eggs Hatched: %s", p.Name, formattedCount),
+                            isPlainText = true,
+                            shouldPing = false
+                        })
+                        processWebhookQueue()
+                        lastHourlyNotification = os.time()
+                    end
+                else
+                    -- Eggs did not increase - player is no longer hatching
+                    if not hasStoppedHatching then
+                        table.insert(webhookQueue, {
+                            message = string.format("%s is no longer hatching.", p.Name),
+                            isPlainText = true,
+                            shouldPing = false
+                        })
+                        processWebhookQueue()
+                        hasStoppedHatching = true
+                    end
+                    lastEggCount = currentEggCount -- Update count
+                end
             else
-                task.wait(60) -- Check every minute if disabled
+                task.wait(60) -- Check every minute if webhook not configured
             end
         end
     end)
@@ -1624,7 +2052,7 @@ task.wait(1)
 connectToEvents()
 setupChatMonitoring()
 setupPlayerTracking()
-startHourlyStatusMessages()
+startEggCountMonitoring()
 
 -- GUI with tab system
 local g = Instance.new("ScreenGui")
@@ -1681,10 +2109,22 @@ detectionTab.Font = Enum.Font.GothamBold
 detectionTab.BorderSizePixel = 0
 detectionTab.Parent = tabContainer
 
+-- Admin Abuse tab button (new)
+local adminAbuseTab = Instance.new("TextButton")
+adminAbuseTab.Size = UDim2.new(1, 0, 0, 50)
+adminAbuseTab.Position = UDim2.new(0, 0, 0, 100)
+adminAbuseTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+adminAbuseTab.Text = "Admin Abuse"
+adminAbuseTab.TextColor3 = Color3.fromRGB(255, 255, 255)
+adminAbuseTab.TextSize = 12
+adminAbuseTab.Font = Enum.Font.GothamBold
+adminAbuseTab.BorderSizePixel = 0
+adminAbuseTab.Parent = tabContainer
+
 -- Extra tab button
 local extraTab = Instance.new("TextButton")
 extraTab.Size = UDim2.new(1, 0, 0, 50)
-extraTab.Position = UDim2.new(0, 0, 0, 100)
+extraTab.Position = UDim2.new(0, 0, 0, 150)
 extraTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 extraTab.Text = "Extra"
 extraTab.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -1707,12 +2147,35 @@ detectionContent.BackgroundTransparency = 1
 detectionContent.Visible = false
 detectionContent.Parent = contentContainer
 
+-- Admin Abuse content frame
+local adminAbuseContent = Instance.new("Frame")
+adminAbuseContent.Size = UDim2.new(1, 0, 1, 0)
+adminAbuseContent.BackgroundTransparency = 1
+adminAbuseContent.Visible = false
+adminAbuseContent.Parent = contentContainer
+
 -- Extra content frame
 local extraContent = Instance.new("Frame")
 extraContent.Size = UDim2.new(1, 0, 1, 0)
 extraContent.BackgroundTransparency = 1
 extraContent.Visible = false
 extraContent.Parent = contentContainer
+
+-- Secret Detection Settings sub-menu frame (overlay)
+local secretSettingsMenu = Instance.new("Frame")
+secretSettingsMenu.Size = UDim2.new(1, 0, 1, 0)
+secretSettingsMenu.BackgroundTransparency = 1
+secretSettingsMenu.Visible = false
+secretSettingsMenu.ZIndex = 5
+secretSettingsMenu.Parent = contentContainer
+
+-- Admin Abuse Secret Settings sub-menu frame (overlay)
+local adminSecretSettingsMenu = Instance.new("Frame")
+adminSecretSettingsMenu.Size = UDim2.new(1, 0, 1, 0)
+adminSecretSettingsMenu.BackgroundTransparency = 1
+adminSecretSettingsMenu.Visible = false
+adminSecretSettingsMenu.ZIndex = 5
+adminSecretSettingsMenu.Parent = contentContainer
 
 -- ==================== PET DETECTION TAB CONTENT ====================
 
@@ -1728,62 +2191,36 @@ detectionTitle.Font = Enum.Font.GothamBold
 detectionTitle.BorderSizePixel = 0
 detectionTitle.Parent = detectionContent
 
--- Row 1: Secret Detection (left) and Secret Ping Mode (right)
--- Secret Detection button (top-left)
-local secretBtn = Instance.new("TextButton")
-secretBtn.Size = UDim2.new(0, 155, 0, 28)
-secretBtn.Position = UDim2.new(0, 15, 0, 50)
-secretBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50) -- Default ON
-secretBtn.Text = "Detect Secrets: ON"
-secretBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-secretBtn.TextSize = 11
-secretBtn.Font = Enum.Font.GothamBold
-secretBtn.BorderSizePixel = 0
-secretBtn.Parent = detectionContent
+-- Row 1: Secret Detection Settings button (full width)
+local secretSettingsBtn = Instance.new("TextButton")
+secretSettingsBtn.Size = UDim2.new(0, 330, 0, 45)
+secretSettingsBtn.Position = UDim2.new(0, 15, 0, 50)
+secretSettingsBtn.BackgroundColor3 = Color3.fromRGB(100, 150, 255)
+secretSettingsBtn.Text = "⚙ Secret Detection Settings"
+secretSettingsBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+secretSettingsBtn.TextSize = 13
+secretSettingsBtn.Font = Enum.Font.GothamBold
+secretSettingsBtn.BorderSizePixel = 0
+secretSettingsBtn.Parent = detectionContent
 
-local secretDesc = Instance.new("TextLabel")
-secretDesc.Size = UDim2.new(0, 155, 0, 22)
-secretDesc.Position = UDim2.new(0, 15, 0, 82)
-secretDesc.BackgroundTransparency = 1
-secretDesc.Text = "Toggle secret pet detection"
-secretDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
-secretDesc.TextSize = 8
-secretDesc.Font = Enum.Font.Gotham
-secretDesc.TextXAlignment = Enum.TextXAlignment.Left
-secretDesc.TextYAlignment = Enum.TextYAlignment.Top
-secretDesc.TextWrapped = true
-secretDesc.Parent = detectionContent
-
--- Secret Ping Mode button (top-right)
-local secretPingBtn = Instance.new("TextButton")
-secretPingBtn.Size = UDim2.new(0, 155, 0, 28)
-secretPingBtn.Position = UDim2.new(0, 180, 0, 50)
-secretPingBtn.BackgroundColor3 = Color3.fromRGB(100, 150, 255)
-secretPingBtn.Text = "Secret Pings: ALL"
-secretPingBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-secretPingBtn.TextSize = 11
-secretPingBtn.Font = Enum.Font.GothamBold
-secretPingBtn.BorderSizePixel = 0
-secretPingBtn.Parent = detectionContent
-
-local secretPingDesc = Instance.new("TextLabel")
-secretPingDesc.Size = UDim2.new(0, 155, 0, 22)
-secretPingDesc.Position = UDim2.new(0, 180, 0, 82)
-secretPingDesc.BackgroundTransparency = 1
-secretPingDesc.Text = "ALL / VARIANTS+INFINITY / NONE"
-secretPingDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
-secretPingDesc.TextSize = 8
-secretPingDesc.Font = Enum.Font.Gotham
-secretPingDesc.TextXAlignment = Enum.TextXAlignment.Left
-secretPingDesc.TextYAlignment = Enum.TextYAlignment.Top
-secretPingDesc.TextWrapped = true
-secretPingDesc.Parent = detectionContent
+local secretSettingsDesc = Instance.new("TextLabel")
+secretSettingsDesc.Size = UDim2.new(0, 330, 0, 22)
+secretSettingsDesc.Position = UDim2.new(0, 15, 0, 100)
+secretSettingsDesc.BackgroundTransparency = 1
+secretSettingsDesc.Text = "Configure granular secret detection and ping settings"
+secretSettingsDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
+secretSettingsDesc.TextSize = 9
+secretSettingsDesc.Font = Enum.Font.Gotham
+secretSettingsDesc.TextXAlignment = Enum.TextXAlignment.Center
+secretSettingsDesc.TextYAlignment = Enum.TextYAlignment.Top
+secretSettingsDesc.TextWrapped = true
+secretSettingsDesc.Parent = detectionContent
 
 -- Row 2: XL Detection (left) and XL Ping (right)
 -- XL Detection button (middle-left)
 local xlBtn = Instance.new("TextButton")
 xlBtn.Size = UDim2.new(0, 155, 0, 28)
-xlBtn.Position = UDim2.new(0, 15, 0, 110)
+xlBtn.Position = UDim2.new(0, 15, 0, 130)
 xlBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60) -- Default OFF
 xlBtn.Text = "Detect XL Pets: OFF"
 xlBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -1794,7 +2231,7 @@ xlBtn.Parent = detectionContent
 
 local xlDesc = Instance.new("TextLabel")
 xlDesc.Size = UDim2.new(0, 155, 0, 22)
-xlDesc.Position = UDim2.new(0, 15, 0, 142)
+xlDesc.Position = UDim2.new(0, 15, 0, 162)
 xlDesc.BackgroundTransparency = 1
 xlDesc.Text = "Toggle XL pet notifications (non-secrets)"
 xlDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
@@ -1808,7 +2245,7 @@ xlDesc.Parent = detectionContent
 -- XL Ping button (middle-right)
 local xlPingBtn = Instance.new("TextButton")
 xlPingBtn.Size = UDim2.new(0, 155, 0, 28)
-xlPingBtn.Position = UDim2.new(0, 180, 0, 110)
+xlPingBtn.Position = UDim2.new(0, 180, 0, 130)
 xlPingBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60) -- Default OFF
 xlPingBtn.Text = "XL Pings: OFF"
 xlPingBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -1819,7 +2256,7 @@ xlPingBtn.Parent = detectionContent
 
 local xlPingDesc = Instance.new("TextLabel")
 xlPingDesc.Size = UDim2.new(0, 155, 0, 22)
-xlPingDesc.Position = UDim2.new(0, 180, 0, 142)
+xlPingDesc.Position = UDim2.new(0, 180, 0, 162)
 xlPingDesc.BackgroundTransparency = 1
 xlPingDesc.Text = "Ping when XL pets hatch"
 xlPingDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
@@ -1834,7 +2271,7 @@ xlPingDesc.Parent = detectionContent
 -- Legendary Detection button (bottom-left)
 local legendaryBtn = Instance.new("TextButton")
 legendaryBtn.Size = UDim2.new(0, 155, 0, 28)
-legendaryBtn.Position = UDim2.new(0, 15, 0, 170)
+legendaryBtn.Position = UDim2.new(0, 15, 0, 190)
 legendaryBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60) -- Default OFF
 legendaryBtn.Text = "Legendary Detection: OFF"
 legendaryBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -1845,7 +2282,7 @@ legendaryBtn.Parent = detectionContent
 
 local legendaryDesc = Instance.new("TextLabel")
 legendaryDesc.Size = UDim2.new(0, 155, 0, 22)
-legendaryDesc.Position = UDim2.new(0, 15, 0, 202)
+legendaryDesc.Position = UDim2.new(0, 15, 0, 222)
 legendaryDesc.BackgroundTransparency = 1
 legendaryDesc.Text = "Toggle legendary detection (testing)"
 legendaryDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
@@ -1859,7 +2296,7 @@ legendaryDesc.Parent = detectionContent
 -- Legendary Ping button (bottom-right)
 local legendaryPingBtn = Instance.new("TextButton")
 legendaryPingBtn.Size = UDim2.new(0, 155, 0, 28)
-legendaryPingBtn.Position = UDim2.new(0, 180, 0, 170)
+legendaryPingBtn.Position = UDim2.new(0, 180, 0, 190)
 legendaryPingBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60) -- Default OFF
 legendaryPingBtn.Text = "Legendary Pings: OFF"
 legendaryPingBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -1870,7 +2307,7 @@ legendaryPingBtn.Parent = detectionContent
 
 local legendaryPingDesc = Instance.new("TextLabel")
 legendaryPingDesc.Size = UDim2.new(0, 155, 0, 22)
-legendaryPingDesc.Position = UDim2.new(0, 180, 0, 202)
+legendaryPingDesc.Position = UDim2.new(0, 180, 0, 222)
 legendaryPingDesc.BackgroundTransparency = 1
 legendaryPingDesc.Text = "Ping when legendary pets hatch"
 legendaryPingDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
@@ -1880,6 +2317,70 @@ legendaryPingDesc.TextXAlignment = Enum.TextXAlignment.Left
 legendaryPingDesc.TextYAlignment = Enum.TextYAlignment.Top
 legendaryPingDesc.TextWrapped = true
 legendaryPingDesc.Parent = detectionContent
+
+-- ==================== ADMIN ABUSE TAB CONTENT ====================
+
+-- Admin Abuse title
+local adminAbuseTitle = Instance.new("TextLabel")
+adminAbuseTitle.Size = UDim2.new(1, 0, 0, 40)
+adminAbuseTitle.Position = UDim2.new(0, 0, 0, 0)
+adminAbuseTitle.BackgroundColor3 = Color3.fromRGB(60, 120, 200)
+adminAbuseTitle.Text = "Admin Abuse Mode"
+adminAbuseTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+adminAbuseTitle.TextSize = 16
+adminAbuseTitle.Font = Enum.Font.GothamBold
+adminAbuseTitle.BorderSizePixel = 0
+adminAbuseTitle.Parent = adminAbuseContent
+
+-- Admin Abuse toggle button
+local adminAbuseToggleBtn = Instance.new("TextButton")
+adminAbuseToggleBtn.Size = UDim2.new(0, 330, 0, 50)
+adminAbuseToggleBtn.Position = UDim2.new(0, 15, 0, 55)
+adminAbuseToggleBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+adminAbuseToggleBtn.Text = "Admin Abuse Mode: OFF"
+adminAbuseToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+adminAbuseToggleBtn.TextSize = 14
+adminAbuseToggleBtn.Font = Enum.Font.GothamBold
+adminAbuseToggleBtn.BorderSizePixel = 0
+adminAbuseToggleBtn.Parent = adminAbuseContent
+
+local adminAbuseToggleDesc = Instance.new("TextLabel")
+adminAbuseToggleDesc.Size = UDim2.new(0, 330, 0, 30)
+adminAbuseToggleDesc.Position = UDim2.new(0, 15, 0, 110)
+adminAbuseToggleDesc.BackgroundTransparency = 1
+adminAbuseToggleDesc.Text = "Use separate detection settings for admin abuse events.\nTracks all secrets/infinities for summary report."
+adminAbuseToggleDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
+adminAbuseToggleDesc.TextSize = 9
+adminAbuseToggleDesc.Font = Enum.Font.Gotham
+adminAbuseToggleDesc.TextXAlignment = Enum.TextXAlignment.Center
+adminAbuseToggleDesc.TextYAlignment = Enum.TextYAlignment.Top
+adminAbuseToggleDesc.TextWrapped = true
+adminAbuseToggleDesc.Parent = adminAbuseContent
+
+-- Admin Abuse settings button
+local adminAbuseSettingsBtn = Instance.new("TextButton")
+adminAbuseSettingsBtn.Size = UDim2.new(0, 330, 0, 45)
+adminAbuseSettingsBtn.Position = UDim2.new(0, 15, 0, 150)
+adminAbuseSettingsBtn.BackgroundColor3 = Color3.fromRGB(100, 150, 255)
+adminAbuseSettingsBtn.Text = "⚙ Configure Admin Abuse Settings"
+adminAbuseSettingsBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+adminAbuseSettingsBtn.TextSize = 13
+adminAbuseSettingsBtn.Font = Enum.Font.GothamBold
+adminAbuseSettingsBtn.BorderSizePixel = 0
+adminAbuseSettingsBtn.Parent = adminAbuseContent
+
+local adminAbuseSettingsDesc = Instance.new("TextLabel")
+adminAbuseSettingsDesc.Size = UDim2.new(0, 330, 0, 22)
+adminAbuseSettingsDesc.Position = UDim2.new(0, 15, 0, 200)
+adminAbuseSettingsDesc.BackgroundTransparency = 1
+adminAbuseSettingsDesc.Text = "Configure which secrets to notify/ping during admin abuse"
+adminAbuseSettingsDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
+adminAbuseSettingsDesc.TextSize = 9
+adminAbuseSettingsDesc.Font = Enum.Font.Gotham
+adminAbuseSettingsDesc.TextXAlignment = Enum.TextXAlignment.Center
+adminAbuseSettingsDesc.TextYAlignment = Enum.TextYAlignment.Top
+adminAbuseSettingsDesc.TextWrapped = true
+adminAbuseSettingsDesc.Parent = adminAbuseContent
 
 -- ==================== HATCHING TAB CONTENT ====================
 
@@ -2027,30 +2528,6 @@ riftDesc.TextYAlignment = Enum.TextYAlignment.Top
 riftDesc.TextWrapped = true
 riftDesc.Parent = extraContent
 
--- Hourly status button (top-right)
-local hourlyBtn = Instance.new("TextButton")
-hourlyBtn.Size = UDim2.new(0, 155, 0, 28)
-hourlyBtn.Position = UDim2.new(0, 180, 0, 50)
-hourlyBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
-hourlyBtn.Text = "Hourly Status: ON"
-hourlyBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-hourlyBtn.TextSize = 11
-hourlyBtn.Font = Enum.Font.GothamBold
-hourlyBtn.BorderSizePixel = 0
-hourlyBtn.Parent = extraContent
-
-local hourlyDesc = Instance.new("TextLabel")
-hourlyDesc.Size = UDim2.new(0, 155, 0, 22)
-hourlyDesc.Position = UDim2.new(0, 180, 0, 82)
-hourlyDesc.BackgroundTransparency = 1
-hourlyDesc.Text = "Sends status every hour with runtime (no ping)"
-hourlyDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
-hourlyDesc.TextSize = 8
-hourlyDesc.Font = Enum.Font.Gotham
-hourlyDesc.TextXAlignment = Enum.TextXAlignment.Left
-hourlyDesc.TextYAlignment = Enum.TextYAlignment.Top
-hourlyDesc.TextWrapped = true
-hourlyDesc.Parent = extraContent
 
 -- Row 2: Player Tracking (left) and Close Script (right)
 -- Player tracking button (bottom-left)
@@ -2161,31 +2638,184 @@ noBtn.BorderSizePixel = 0
 noBtn.ZIndex = 11
 noBtn.Parent = confirmFrame
 
+-- ==================== SECRET DETECTION SETTINGS SUB-MENU ====================
+
+-- Helper function to create secret settings menu content (reusable for both main and admin abuse)
+local function createSecretSettingsMenu(parentFrame, isAdminAbuse)
+    -- Background
+    local bg = Instance.new("Frame")
+    bg.Size = UDim2.new(1, 0, 1, 0)
+    bg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    bg.BorderSizePixel = 0
+    bg.ZIndex = 6
+    bg.Parent = parentFrame
+    
+    -- Title
+    local menuTitle = Instance.new("TextLabel")
+    menuTitle.Size = UDim2.new(1, 0, 0, 40)
+    menuTitle.BackgroundColor3 = Color3.fromRGB(60, 120, 200)
+    menuTitle.Text = isAdminAbuse and "Admin Abuse Secret Settings" or "Secret Detection Settings"
+    menuTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+    menuTitle.TextSize = 14
+    menuTitle.Font = Enum.Font.GothamBold
+    menuTitle.BorderSizePixel = 0
+    menuTitle.ZIndex = 7
+    menuTitle.Parent = bg
+    
+    -- Back button
+    local backBtn = Instance.new("TextButton")
+    backBtn.Size = UDim2.new(0, 60, 0, 30)
+    backBtn.Position = UDim2.new(0, 5, 0, 5)
+    backBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+    backBtn.Text = "← Back"
+    backBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    backBtn.TextSize = 11
+    backBtn.Font = Enum.Font.GothamBold
+    backBtn.BorderSizePixel = 0
+    backBtn.ZIndex = 8
+    backBtn.Parent = bg
+    
+    -- Section labels
+    local notifyLabel = Instance.new("TextLabel")
+    notifyLabel.Size = UDim2.new(0, 150, 0, 20)
+    notifyLabel.Position = UDim2.new(0, 15, 0, 45)
+    notifyLabel.BackgroundTransparency = 1
+    notifyLabel.Text = "Notifications"
+    notifyLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
+    notifyLabel.TextSize = 11
+    notifyLabel.Font = Enum.Font.GothamBold
+    notifyLabel.TextXAlignment = Enum.TextXAlignment.Left
+    notifyLabel.ZIndex = 7
+    notifyLabel.Parent = bg
+    
+    local pingLabel = Instance.new("TextLabel")
+    pingLabel.Size = UDim2.new(0, 150, 0, 20)
+    pingLabel.Position = UDim2.new(0, 185, 0, 45)
+    pingLabel.BackgroundTransparency = 1
+    pingLabel.Text = "Pings"
+    pingLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
+    pingLabel.TextSize = 11
+    pingLabel.Font = Enum.Font.GothamBold
+    pingLabel.TextXAlignment = Enum.TextXAlignment.Left
+    pingLabel.ZIndex = 7
+    pingLabel.Parent = bg
+    
+    -- Storage for buttons (returned to caller)
+    local buttons = {}
+    
+    -- Create rows for: Normal, Shiny, Mythic, Shiny Mythic, XL, Infinities, <1B Filter
+    local rows = {
+        {name = "Normal", key = "Normal", yPos = 70},
+        {name = "Shiny", key = "Shiny", yPos = 95},
+        {name = "Mythic", key = "Mythic", yPos = 120},
+        {name = "Shiny Mythic", key = "ShinyMythic", yPos = 145},
+        {name = "XL", key = "XL", yPos = 170},
+        {name = "Infinities", key = "Infinity", yPos = 195, special = true}
+    }
+    
+    for _, row in ipairs(rows) do
+        -- Notify button (left)
+        local notifyBtn = Instance.new("TextButton")
+        notifyBtn.Size = UDim2.new(0, 150, 0, 22)
+        notifyBtn.Position = UDim2.new(0, 15, 0, row.yPos)
+        notifyBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+        notifyBtn.Text = row.name .. ": OFF"
+        notifyBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        notifyBtn.TextSize = 9
+        notifyBtn.Font = Enum.Font.GothamBold
+        notifyBtn.BorderSizePixel = 0
+        notifyBtn.ZIndex = 7
+        notifyBtn.Parent = bg
+        buttons["notify" .. row.key] = notifyBtn
+        
+        -- Ping button (right)
+        local pingBtn = Instance.new("TextButton")
+        pingBtn.Size = UDim2.new(0, 150, 0, 22)
+        pingBtn.Position = UDim2.new(0, 185, 0, row.yPos)
+        pingBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+        pingBtn.Text = "Ping: OFF"
+        pingBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        pingBtn.TextSize = 9
+        pingBtn.Font = Enum.Font.GothamBold
+        pingBtn.BorderSizePixel = 0
+        pingBtn.ZIndex = 7
+        pingBtn.Parent = bg
+        buttons["ping" .. row.key] = pingBtn
+    end
+    
+    -- <1B Filter button (full width)
+    local filterBtn = Instance.new("TextButton")
+    filterBtn.Size = UDim2.new(0, 320, 0, 22)
+    filterBtn.Position = UDim2.new(0, 15, 0, 220)
+    filterBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    filterBtn.Text = "Filter <1B Secrets: OFF"
+    filterBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    filterBtn.TextSize = 9
+    filterBtn.Font = Enum.Font.GothamBold
+    filterBtn.BorderSizePixel = 0
+    filterBtn.ZIndex = 7
+    filterBtn.Parent = bg
+    buttons["filter"] = filterBtn
+    
+    return buttons, backBtn
+end
+
+-- Create main secret settings menu
+local mainSecretButtons, mainSecretBackBtn = createSecretSettingsMenu(secretSettingsMenu, false)
+
+-- Create admin abuse secret settings menu
+local adminSecretButtons, adminSecretBackBtn = createSecretSettingsMenu(adminSecretSettingsMenu, true)
+
 -- Tab switching logic
 hatchingTab.Activated:Connect(function()
     hatchingContent.Visible = true
     detectionContent.Visible = false
+    adminAbuseContent.Visible = false
     extraContent.Visible = false
+    secretSettingsMenu.Visible = false
+    adminSecretSettingsMenu.Visible = false
     hatchingTab.BackgroundColor3 = Color3.fromRGB(60, 120, 200)
     detectionTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    adminAbuseTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
     extraTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 end)
 
 detectionTab.Activated:Connect(function()
     hatchingContent.Visible = false
     detectionContent.Visible = true
+    adminAbuseContent.Visible = false
     extraContent.Visible = false
+    secretSettingsMenu.Visible = false
+    adminSecretSettingsMenu.Visible = false
     hatchingTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
     detectionTab.BackgroundColor3 = Color3.fromRGB(60, 120, 200)
+    adminAbuseTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    extraTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+end)
+
+adminAbuseTab.Activated:Connect(function()
+    hatchingContent.Visible = false
+    detectionContent.Visible = false
+    adminAbuseContent.Visible = true
+    extraContent.Visible = false
+    secretSettingsMenu.Visible = false
+    adminSecretSettingsMenu.Visible = false
+    hatchingTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    detectionTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    adminAbuseTab.BackgroundColor3 = Color3.fromRGB(60, 120, 200)
     extraTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 end)
 
 extraTab.Activated:Connect(function()
     hatchingContent.Visible = false
     detectionContent.Visible = false
+    adminAbuseContent.Visible = false
     extraContent.Visible = true
+    secretSettingsMenu.Visible = false
+    adminSecretSettingsMenu.Visible = false
     hatchingTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
     detectionTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    adminAbuseTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
     extraTab.BackgroundColor3 = Color3.fromRGB(60, 120, 200)
 end)
 
@@ -2233,22 +2863,6 @@ riftBtn.Activated:Connect(function()
     saveSettings()
 end)
 
--- Hourly status toggle
-hourlyBtn.Activated:Connect(function()
-    if not scriptActive then return end
-    
-    hourlyStatusEnabled = not hourlyStatusEnabled
-    
-    if hourlyStatusEnabled then
-        hourlyBtn.Text = "Hourly Status: ON"
-        hourlyBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
-    else
-        hourlyBtn.Text = "Hourly Status: OFF"
-        hourlyBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-    end
-    
-    saveSettings()
-end)
 
 -- Player tracking toggle
 playerBtn.Activated:Connect(function()
@@ -2267,6 +2881,221 @@ playerBtn.Activated:Connect(function()
     saveSettings()
 end)
 
+-- Admin Abuse Tab Button Handlers
+
+-- Admin Abuse Settings button - opens sub-menu
+adminAbuseSettingsBtn.Activated:Connect(function()
+    if not scriptActive then return end
+    adminSecretSettingsMenu.Visible = true
+end)
+
+-- Admin Secret Settings Back button
+adminSecretBackBtn.Activated:Connect(function()
+    adminSecretSettingsMenu.Visible = false
+    saveSettings()
+end)
+
+-- Admin Secret Settings Handlers (similar to main, but updates adminAbuseSecretSettings table)
+adminSecretButtons.notifyNormal.Activated:Connect(function()
+    if not scriptActive then return end
+    adminAbuseSecretSettings.notifyNormal = not adminAbuseSecretSettings.notifyNormal
+    adminSecretButtons.notifyNormal.Text = adminAbuseSecretSettings.notifyNormal and "Normal: ON" or "Normal: OFF"
+    adminSecretButtons.notifyNormal.BackgroundColor3 = adminAbuseSecretSettings.notifyNormal and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+adminSecretButtons.notifyShiny.Activated:Connect(function()
+    if not scriptActive then return end
+    adminAbuseSecretSettings.notifyShiny = not adminAbuseSecretSettings.notifyShiny
+    adminSecretButtons.notifyShiny.Text = adminAbuseSecretSettings.notifyShiny and "Shiny: ON" or "Shiny: OFF"
+    adminSecretButtons.notifyShiny.BackgroundColor3 = adminAbuseSecretSettings.notifyShiny and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+adminSecretButtons.notifyMythic.Activated:Connect(function()
+    if not scriptActive then return end
+    adminAbuseSecretSettings.notifyMythic = not adminAbuseSecretSettings.notifyMythic
+    adminSecretButtons.notifyMythic.Text = adminAbuseSecretSettings.notifyMythic and "Mythic: ON" or "Mythic: OFF"
+    adminSecretButtons.notifyMythic.BackgroundColor3 = adminAbuseSecretSettings.notifyMythic and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+adminSecretButtons.notifyShinyMythic.Activated:Connect(function()
+    if not scriptActive then return end
+    adminAbuseSecretSettings.notifyShinyMythic = not adminAbuseSecretSettings.notifyShinyMythic
+    adminSecretButtons.notifyShinyMythic.Text = adminAbuseSecretSettings.notifyShinyMythic and "Shiny Mythic: ON" or "Shiny Mythic: OFF"
+    adminSecretButtons.notifyShinyMythic.BackgroundColor3 = adminAbuseSecretSettings.notifyShinyMythic and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+adminSecretButtons.notifyXL.Activated:Connect(function()
+    if not scriptActive then return end
+    adminAbuseSecretSettings.notifyXL = not adminAbuseSecretSettings.notifyXL
+    adminSecretButtons.notifyXL.Text = adminAbuseSecretSettings.notifyXL and "XL: ON" or "XL: OFF"
+    adminSecretButtons.notifyXL.BackgroundColor3 = adminAbuseSecretSettings.notifyXL and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+adminSecretButtons.notifyInfinity.Activated:Connect(function()
+    if not scriptActive then return end
+    local current = adminAbuseSecretSettings.notifyInfinity
+    if current == nil then current = true end
+    adminAbuseSecretSettings.notifyInfinity = not current
+    adminSecretButtons.notifyInfinity.Text = adminAbuseSecretSettings.notifyInfinity and "Infinities: ON" or "Infinities: OFF"
+    adminSecretButtons.notifyInfinity.BackgroundColor3 = adminAbuseSecretSettings.notifyInfinity and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+adminSecretButtons.pingNormal.Activated:Connect(function()
+    if not scriptActive then return end
+    adminAbuseSecretSettings.pingNormal = not adminAbuseSecretSettings.pingNormal
+    adminSecretButtons.pingNormal.Text = adminAbuseSecretSettings.pingNormal and "Ping: ON" or "Ping: OFF"
+    adminSecretButtons.pingNormal.BackgroundColor3 = adminAbuseSecretSettings.pingNormal and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+adminSecretButtons.pingShiny.Activated:Connect(function()
+    if not scriptActive then return end
+    adminAbuseSecretSettings.pingShiny = not adminAbuseSecretSettings.pingShiny
+    adminSecretButtons.pingShiny.Text = adminAbuseSecretSettings.pingShiny and "Ping: ON" or "Ping: OFF"
+    adminSecretButtons.pingShiny.BackgroundColor3 = adminAbuseSecretSettings.pingShiny and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+adminSecretButtons.pingMythic.Activated:Connect(function()
+    if not scriptActive then return end
+    adminAbuseSecretSettings.pingMythic = not adminAbuseSecretSettings.pingMythic
+    adminSecretButtons.pingMythic.Text = adminAbuseSecretSettings.pingMythic and "Ping: ON" or "Ping: OFF"
+    adminSecretButtons.pingMythic.BackgroundColor3 = adminAbuseSecretSettings.pingMythic and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+adminSecretButtons.pingShinyMythic.Activated:Connect(function()
+    if not scriptActive then return end
+    adminAbuseSecretSettings.pingShinyMythic = not adminAbuseSecretSettings.pingShinyMythic
+    adminSecretButtons.pingShinyMythic.Text = adminAbuseSecretSettings.pingShinyMythic and "Ping: ON" or "Ping: OFF"
+    adminSecretButtons.pingShinyMythic.BackgroundColor3 = adminAbuseSecretSettings.pingShinyMythic and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+adminSecretButtons.pingXL.Activated:Connect(function()
+    if not scriptActive then return end
+    adminAbuseSecretSettings.pingXL = not adminAbuseSecretSettings.pingXL
+    adminSecretButtons.pingXL.Text = adminAbuseSecretSettings.pingXL and "Ping: ON" or "Ping: OFF"
+    adminSecretButtons.pingXL.BackgroundColor3 = adminAbuseSecretSettings.pingXL and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+adminSecretButtons.pingInfinity.Activated:Connect(function()
+    if not scriptActive then return end
+    local current = adminAbuseSecretSettings.pingInfinity
+    if current == nil then current = true end
+    adminAbuseSecretSettings.pingInfinity = not current
+    adminSecretButtons.pingInfinity.Text = adminAbuseSecretSettings.pingInfinity and "Ping: ON" or "Ping: OFF"
+    adminSecretButtons.pingInfinity.BackgroundColor3 = adminAbuseSecretSettings.pingInfinity and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+adminSecretButtons.filter.Activated:Connect(function()
+    if not scriptActive then return end
+    adminAbuseSecretSettings.filterUnder1B = not adminAbuseSecretSettings.filterUnder1B
+    adminSecretButtons.filter.Text = adminAbuseSecretSettings.filterUnder1B and "Filter <1B Secrets: ON" or "Filter <1B Secrets: OFF"
+    adminSecretButtons.filter.BackgroundColor3 = adminAbuseSecretSettings.filterUnder1B and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+-- Admin Abuse Toggle button (with confirmation on deactivation)
+-- Confirmation dialog for admin abuse deactivation
+local adminAbuseConfirmFrame = Instance.new("Frame")
+adminAbuseConfirmFrame.Size = UDim2.new(0, 320, 0, 170)
+adminAbuseConfirmFrame.Position = UDim2.new(0.5, -160, 0.5, -85)
+adminAbuseConfirmFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+adminAbuseConfirmFrame.BorderSizePixel = 2
+adminAbuseConfirmFrame.BorderColor3 = Color3.fromRGB(200, 150, 50)
+adminAbuseConfirmFrame.Visible = false
+adminAbuseConfirmFrame.ZIndex = 10
+adminAbuseConfirmFrame.Parent = g
+
+local adminAbuseConfirmTitle = Instance.new("TextLabel")
+adminAbuseConfirmTitle.Size = UDim2.new(1, 0, 0, 40)
+adminAbuseConfirmTitle.BackgroundColor3 = Color3.fromRGB(200, 150, 50)
+adminAbuseConfirmTitle.Text = "Stop Admin Abuse Mode?"
+adminAbuseConfirmTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+adminAbuseConfirmTitle.TextSize = 14
+adminAbuseConfirmTitle.Font = Enum.Font.GothamBold
+adminAbuseConfirmTitle.BorderSizePixel = 0
+adminAbuseConfirmTitle.ZIndex = 11
+adminAbuseConfirmTitle.Parent = adminAbuseConfirmFrame
+
+local adminAbuseConfirmText = Instance.new("TextLabel")
+adminAbuseConfirmText.Size = UDim2.new(0, 300, 0, 70)
+adminAbuseConfirmText.Position = UDim2.new(0, 10, 0, 45)
+adminAbuseConfirmText.BackgroundTransparency = 1
+adminAbuseConfirmText.Text = "A summary of all secrets/infinities hatched during admin abuse will be sent to your webhook."
+adminAbuseConfirmText.TextColor3 = Color3.fromRGB(255, 255, 255)
+adminAbuseConfirmText.TextSize = 11
+adminAbuseConfirmText.Font = Enum.Font.Gotham
+adminAbuseConfirmText.TextWrapped = true
+adminAbuseConfirmText.ZIndex = 11
+adminAbuseConfirmText.Parent = adminAbuseConfirmFrame
+
+local adminAbuseYesBtn = Instance.new("TextButton")
+adminAbuseYesBtn.Size = UDim2.new(0, 130, 0, 35)
+adminAbuseYesBtn.Position = UDim2.new(0, 15, 1, -50)
+adminAbuseYesBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+adminAbuseYesBtn.Text = "Yes, Stop & Send"
+adminAbuseYesBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+adminAbuseYesBtn.TextSize = 11
+adminAbuseYesBtn.Font = Enum.Font.GothamBold
+adminAbuseYesBtn.BorderSizePixel = 0
+adminAbuseYesBtn.ZIndex = 11
+adminAbuseYesBtn.Parent = adminAbuseConfirmFrame
+
+local adminAbuseNoBtn = Instance.new("TextButton")
+adminAbuseNoBtn.Size = UDim2.new(0, 130, 0, 35)
+adminAbuseNoBtn.Position = UDim2.new(1, -145, 1, -50)
+adminAbuseNoBtn.BackgroundColor3 = Color3.fromRGB(80, 140, 80)
+adminAbuseNoBtn.Text = "Cancel"
+adminAbuseNoBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+adminAbuseNoBtn.TextSize = 11
+adminAbuseNoBtn.Font = Enum.Font.GothamBold
+adminAbuseNoBtn.BorderSizePixel = 0
+adminAbuseNoBtn.ZIndex = 11
+adminAbuseNoBtn.Parent = adminAbuseConfirmFrame
+
+adminAbuseToggleBtn.Activated:Connect(function()
+    if not scriptActive then return end
+    
+    if adminAbuseActive then
+        -- Show confirmation dialog
+        adminAbuseConfirmFrame.Visible = true
+    else
+        -- Turn ON admin abuse mode
+        adminAbuseActive = true
+        adminAbuseHatchedPets = {} -- Reset tracking
+        adminAbuseToggleBtn.Text = "Admin Abuse Mode: ON"
+        adminAbuseToggleBtn.BackgroundColor3 = Color3.fromRGB(255, 200, 50)
+        print(">>> ADMIN ABUSE MODE ACTIVATED <<<")
+    end
+end)
+
+adminAbuseYesBtn.Activated:Connect(function()
+    -- Turn OFF admin abuse mode and send summary
+    adminAbuseActive = false
+    adminAbuseToggleBtn.Text = "Admin Abuse Mode: OFF"
+    adminAbuseToggleBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    adminAbuseConfirmFrame.Visible = false
+    
+    -- Generate and send summary (function defined later)
+    sendAdminAbuseSummary()
+    
+    print(">>> ADMIN ABUSE MODE DEACTIVATED <<<")
+end)
+
+adminAbuseNoBtn.Activated:Connect(function()
+    adminAbuseConfirmFrame.Visible = false
+end)
+
 -- Close Script button - opens confirmation dialog
 closeScriptBtn.Activated:Connect(function()
     confirmFrame.Visible = true
@@ -2274,43 +3103,120 @@ end)
 
 -- Pet Detection Tab Button Handlers
 
--- Secret Detection toggle
-secretBtn.Activated:Connect(function()
+-- Secret Settings button - opens sub-menu
+secretSettingsBtn.Activated:Connect(function()
     if not scriptActive then return end
-    
-    secretDetectionEnabled = not secretDetectionEnabled
-    
-    if secretDetectionEnabled then
-        secretBtn.Text = "Detect Secrets: ON"
-        secretBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
-    else
-        secretBtn.Text = "Detect Secrets: OFF"
-        secretBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-    end
-    
+    secretSettingsMenu.Visible = true
+end)
+
+-- Main Secret Settings Back button
+mainSecretBackBtn.Activated:Connect(function()
+    secretSettingsMenu.Visible = false
     saveSettings()
 end)
 
--- Secret Ping Mode toggle (cycles through 3 modes)
-secretPingBtn.Activated:Connect(function()
+-- Main Secret Settings Handlers
+mainSecretButtons.notifyNormal.Activated:Connect(function()
     if not scriptActive then return end
-    
-    secretPingMode = secretPingMode + 1
-    if secretPingMode > 3 then
-        secretPingMode = 1
-    end
-    
-    if secretPingMode == 1 then
-        secretPingBtn.Text = "Secret Pings: ALL"
-        secretPingBtn.BackgroundColor3 = Color3.fromRGB(100, 150, 255)
-    elseif secretPingMode == 2 then
-        secretPingBtn.Text = "Secret Pings: VARIANTS"
-        secretPingBtn.BackgroundColor3 = Color3.fromRGB(150, 100, 255)
-    else
-        secretPingBtn.Text = "Secret Pings: NONE"
-        secretPingBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-    end
-    
+    secretNotifyNormal = not secretNotifyNormal
+    mainSecretButtons.notifyNormal.Text = secretNotifyNormal and "Normal: ON" or "Normal: OFF"
+    mainSecretButtons.notifyNormal.BackgroundColor3 = secretNotifyNormal and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+mainSecretButtons.notifyShiny.Activated:Connect(function()
+    if not scriptActive then return end
+    secretNotifyShiny = not secretNotifyShiny
+    mainSecretButtons.notifyShiny.Text = secretNotifyShiny and "Shiny: ON" or "Shiny: OFF"
+    mainSecretButtons.notifyShiny.BackgroundColor3 = secretNotifyShiny and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+mainSecretButtons.notifyMythic.Activated:Connect(function()
+    if not scriptActive then return end
+    secretNotifyMythic = not secretNotifyMythic
+    mainSecretButtons.notifyMythic.Text = secretNotifyMythic and "Mythic: ON" or "Mythic: OFF"
+    mainSecretButtons.notifyMythic.BackgroundColor3 = secretNotifyMythic and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+mainSecretButtons.notifyShinyMythic.Activated:Connect(function()
+    if not scriptActive then return end
+    secretNotifyShinyMythic = not secretNotifyShinyMythic
+    mainSecretButtons.notifyShinyMythic.Text = secretNotifyShinyMythic and "Shiny Mythic: ON" or "Shiny Mythic: OFF"
+    mainSecretButtons.notifyShinyMythic.BackgroundColor3 = secretNotifyShinyMythic and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+mainSecretButtons.notifyXL.Activated:Connect(function()
+    if not scriptActive then return end
+    secretNotifyXL = not secretNotifyXL
+    mainSecretButtons.notifyXL.Text = secretNotifyXL and "XL: ON" or "XL: OFF"
+    mainSecretButtons.notifyXL.BackgroundColor3 = secretNotifyXL and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+mainSecretButtons.notifyInfinity.Activated:Connect(function()
+    if not scriptActive then return end
+    infinityNotifyEnabled = not infinityNotifyEnabled
+    mainSecretButtons.notifyInfinity.Text = infinityNotifyEnabled and "Infinities: ON" or "Infinities: OFF"
+    mainSecretButtons.notifyInfinity.BackgroundColor3 = infinityNotifyEnabled and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+mainSecretButtons.pingNormal.Activated:Connect(function()
+    if not scriptActive then return end
+    secretPingNormal = not secretPingNormal
+    mainSecretButtons.pingNormal.Text = secretPingNormal and "Ping: ON" or "Ping: OFF"
+    mainSecretButtons.pingNormal.BackgroundColor3 = secretPingNormal and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+mainSecretButtons.pingShiny.Activated:Connect(function()
+    if not scriptActive then return end
+    secretPingShiny = not secretPingShiny
+    mainSecretButtons.pingShiny.Text = secretPingShiny and "Ping: ON" or "Ping: OFF"
+    mainSecretButtons.pingShiny.BackgroundColor3 = secretPingShiny and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+mainSecretButtons.pingMythic.Activated:Connect(function()
+    if not scriptActive then return end
+    secretPingMythic = not secretPingMythic
+    mainSecretButtons.pingMythic.Text = secretPingMythic and "Ping: ON" or "Ping: OFF"
+    mainSecretButtons.pingMythic.BackgroundColor3 = secretPingMythic and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+mainSecretButtons.pingShinyMythic.Activated:Connect(function()
+    if not scriptActive then return end
+    secretPingShinyMythic = not secretPingShinyMythic
+    mainSecretButtons.pingShinyMythic.Text = secretPingShinyMythic and "Ping: ON" or "Ping: OFF"
+    mainSecretButtons.pingShinyMythic.BackgroundColor3 = secretPingShinyMythic and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+mainSecretButtons.pingXL.Activated:Connect(function()
+    if not scriptActive then return end
+    secretPingXL = not secretPingXL
+    mainSecretButtons.pingXL.Text = secretPingXL and "Ping: ON" or "Ping: OFF"
+    mainSecretButtons.pingXL.BackgroundColor3 = secretPingXL and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+mainSecretButtons.pingInfinity.Activated:Connect(function()
+    if not scriptActive then return end
+    infinityPingEnabled = not infinityPingEnabled
+    mainSecretButtons.pingInfinity.Text = infinityPingEnabled and "Ping: ON" or "Ping: OFF"
+    mainSecretButtons.pingInfinity.BackgroundColor3 = infinityPingEnabled and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+mainSecretButtons.filter.Activated:Connect(function()
+    if not scriptActive then return end
+    secretFilterUnder1B = not secretFilterUnder1B
+    mainSecretButtons.filter.Text = secretFilterUnder1B and "Filter <1B Secrets: ON" or "Filter <1B Secrets: OFF"
+    mainSecretButtons.filter.BackgroundColor3 = secretFilterUnder1B and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
     saveSettings()
 end)
 
@@ -2453,6 +3359,149 @@ noBtn.Activated:Connect(function()
 end)
 
 print("✓ GUI created")
+
+-- Update button states to reflect loaded settings
+task.wait(0.1) -- Small delay to ensure all GUI elements are fully created
+spawn(function()
+    -- Update rift detection button
+    if riftDetectionEnabled then
+        riftBtn.Text = "Rift Detection: ON"
+        riftBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+    else
+        riftBtn.Text = "Rift Detection: OFF"
+        riftBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    end
+    
+    -- Update player tracking button
+    if playerTrackingEnabled then
+        playerBtn.Text = "Player Track: ON"
+        playerBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+    else
+        playerBtn.Text = "Player Track: OFF"
+        playerBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    end
+    
+    -- Update XL detection buttons
+    if xlDetectionEnabled then
+        xlBtn.Text = "Detect XL Pets: ON"
+        xlBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+    else
+        xlBtn.Text = "Detect XL Pets: OFF"
+        xlBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    end
+    
+    if xlPingEnabled then
+        xlPingBtn.Text = "XL Pings: ON"
+        xlPingBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+    else
+        xlPingBtn.Text = "XL Pings: OFF"
+        xlPingBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    end
+    
+    -- Update legendary detection buttons
+    if legendaryDetectionEnabled then
+        legendaryBtn.Text = "Legendary Detection: ON"
+        legendaryBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+    else
+        legendaryBtn.Text = "Legendary Detection: OFF"
+        legendaryBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    end
+    
+    if legendaryPingEnabled then
+        legendaryPingBtn.Text = "Legendary Pings: ON"
+        legendaryPingBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+    else
+        legendaryPingBtn.Text = "Legendary Pings: OFF"
+        legendaryPingBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    end
+    
+    -- Update main secret settings buttons
+    mainSecretButtons.notifyNormal.Text = secretNotifyNormal and "Normal: ON" or "Normal: OFF"
+    mainSecretButtons.notifyNormal.BackgroundColor3 = secretNotifyNormal and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    mainSecretButtons.notifyShiny.Text = secretNotifyShiny and "Shiny: ON" or "Shiny: OFF"
+    mainSecretButtons.notifyShiny.BackgroundColor3 = secretNotifyShiny and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    mainSecretButtons.notifyMythic.Text = secretNotifyMythic and "Mythic: ON" or "Mythic: OFF"
+    mainSecretButtons.notifyMythic.BackgroundColor3 = secretNotifyMythic and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    mainSecretButtons.notifyShinyMythic.Text = secretNotifyShinyMythic and "Shiny Mythic: ON" or "Shiny Mythic: OFF"
+    mainSecretButtons.notifyShinyMythic.BackgroundColor3 = secretNotifyShinyMythic and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    mainSecretButtons.notifyXL.Text = secretNotifyXL and "XL: ON" or "XL: OFF"
+    mainSecretButtons.notifyXL.BackgroundColor3 = secretNotifyXL and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    mainSecretButtons.notifyInfinity.Text = infinityNotifyEnabled and "Infinities: ON" or "Infinities: OFF"
+    mainSecretButtons.notifyInfinity.BackgroundColor3 = infinityNotifyEnabled and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    mainSecretButtons.pingNormal.Text = secretPingNormal and "Ping: ON" or "Ping: OFF"
+    mainSecretButtons.pingNormal.BackgroundColor3 = secretPingNormal and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    mainSecretButtons.pingShiny.Text = secretPingShiny and "Ping: ON" or "Ping: OFF"
+    mainSecretButtons.pingShiny.BackgroundColor3 = secretPingShiny and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    mainSecretButtons.pingMythic.Text = secretPingMythic and "Ping: ON" or "Ping: OFF"
+    mainSecretButtons.pingMythic.BackgroundColor3 = secretPingMythic and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    mainSecretButtons.pingShinyMythic.Text = secretPingShinyMythic and "Ping: ON" or "Ping: OFF"
+    mainSecretButtons.pingShinyMythic.BackgroundColor3 = secretPingShinyMythic and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    mainSecretButtons.pingXL.Text = secretPingXL and "Ping: ON" or "Ping: OFF"
+    mainSecretButtons.pingXL.BackgroundColor3 = secretPingXL and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    mainSecretButtons.pingInfinity.Text = infinityPingEnabled and "Ping: ON" or "Ping: OFF"
+    mainSecretButtons.pingInfinity.BackgroundColor3 = infinityPingEnabled and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    mainSecretButtons.filter.Text = secretFilterUnder1B and "Filter <1B Secrets: ON" or "Filter <1B Secrets: OFF"
+    mainSecretButtons.filter.BackgroundColor3 = secretFilterUnder1B and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    -- Update admin secret settings buttons
+    adminSecretButtons.notifyNormal.Text = adminAbuseSecretSettings.notifyNormal and "Normal: ON" or "Normal: OFF"
+    adminSecretButtons.notifyNormal.BackgroundColor3 = adminAbuseSecretSettings.notifyNormal and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    adminSecretButtons.notifyShiny.Text = adminAbuseSecretSettings.notifyShiny and "Shiny: ON" or "Shiny: OFF"
+    adminSecretButtons.notifyShiny.BackgroundColor3 = adminAbuseSecretSettings.notifyShiny and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    adminSecretButtons.notifyMythic.Text = adminAbuseSecretSettings.notifyMythic and "Mythic: ON" or "Mythic: OFF"
+    adminSecretButtons.notifyMythic.BackgroundColor3 = adminAbuseSecretSettings.notifyMythic and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    adminSecretButtons.notifyShinyMythic.Text = adminAbuseSecretSettings.notifyShinyMythic and "Shiny Mythic: ON" or "Shiny Mythic: OFF"
+    adminSecretButtons.notifyShinyMythic.BackgroundColor3 = adminAbuseSecretSettings.notifyShinyMythic and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    adminSecretButtons.notifyXL.Text = adminAbuseSecretSettings.notifyXL and "XL: ON" or "XL: OFF"
+    adminSecretButtons.notifyXL.BackgroundColor3 = adminAbuseSecretSettings.notifyXL and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    local adminInfinityNotify = adminAbuseSecretSettings.notifyInfinity
+    if adminInfinityNotify == nil then adminInfinityNotify = true end
+    adminSecretButtons.notifyInfinity.Text = adminInfinityNotify and "Infinities: ON" or "Infinities: OFF"
+    adminSecretButtons.notifyInfinity.BackgroundColor3 = adminInfinityNotify and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    adminSecretButtons.pingNormal.Text = adminAbuseSecretSettings.pingNormal and "Ping: ON" or "Ping: OFF"
+    adminSecretButtons.pingNormal.BackgroundColor3 = adminAbuseSecretSettings.pingNormal and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    adminSecretButtons.pingShiny.Text = adminAbuseSecretSettings.pingShiny and "Ping: ON" or "Ping: OFF"
+    adminSecretButtons.pingShiny.BackgroundColor3 = adminAbuseSecretSettings.pingShiny and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    adminSecretButtons.pingMythic.Text = adminAbuseSecretSettings.pingMythic and "Ping: ON" or "Ping: OFF"
+    adminSecretButtons.pingMythic.BackgroundColor3 = adminAbuseSecretSettings.pingMythic and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    adminSecretButtons.pingShinyMythic.Text = adminAbuseSecretSettings.pingShinyMythic and "Ping: ON" or "Ping: OFF"
+    adminSecretButtons.pingShinyMythic.BackgroundColor3 = adminAbuseSecretSettings.pingShinyMythic and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    adminSecretButtons.pingXL.Text = adminAbuseSecretSettings.pingXL and "Ping: ON" or "Ping: OFF"
+    adminSecretButtons.pingXL.BackgroundColor3 = adminAbuseSecretSettings.pingXL and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    local adminInfinityPing = adminAbuseSecretSettings.pingInfinity
+    if adminInfinityPing == nil then adminInfinityPing = true end
+    adminSecretButtons.pingInfinity.Text = adminInfinityPing and "Ping: ON" or "Ping: OFF"
+    adminSecretButtons.pingInfinity.BackgroundColor3 = adminInfinityPing and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    adminSecretButtons.filter.Text = adminAbuseSecretSettings.filterUnder1B and "Filter <1B Secrets: ON" or "Filter <1B Secrets: OFF"
+    adminSecretButtons.filter.BackgroundColor3 = adminAbuseSecretSettings.filterUnder1B and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    print("✓ Button states updated from loaded settings")
+end)
+
 print("Ready! Click 'Auto Hatch' to start hatching")
 
 -- Monitor GUI to detect if it gets destroyed unexpectedly
