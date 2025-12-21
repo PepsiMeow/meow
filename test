@@ -1942,7 +1942,9 @@ end
 
 -- Egg count monitoring system (checks every 10 minutes at :X0)
 local lastEggCount = nil
-local lastHourlyNotification = 0
+local lastHourlyEggCount = nil -- Eggs at last hourly notification
+local firstCheckTime = nil -- Time of first check
+local lastHourNotified = nil -- Which hour we last sent a message for (0-23)
 local hasStoppedHatching = false -- Track if we've already sent "stopped hatching" message
 local function startEggCountMonitoring()
     spawn(function()
@@ -1996,34 +1998,67 @@ local function startEggCountMonitoring()
                         hasStoppedHatching = true
                     end
                     lastEggCount = nil
+                    lastHourlyEggCount = nil
+                    firstCheckTime = nil
                 elseif lastEggCount == nil then
-                    -- First check - just record the count
+                    -- First check - record baseline
                     lastEggCount = currentEggCount
-                    lastHourlyNotification = os.time()
+                    lastHourlyEggCount = currentEggCount
+                    firstCheckTime = os.time()
                     hasStoppedHatching = false
                 elseif currentEggCount > lastEggCount then
                     -- Eggs increased - player is still hatching
                     lastEggCount = currentEggCount
                     hasStoppedHatching = false -- Reset flag since they're hatching again
                     
-                    -- Check if it's been at least 1 hour since last "still hatching" message
-                    local timeSinceLastNotif = os.time() - lastHourlyNotification
-                    if timeSinceLastNotif >= 3600 then
-                        -- Format egg count
-                        local formattedCount = currentEggCount
-                        if FormatCommas then
-                            formattedCount = FormatCommas(currentEggCount)
-                        else
-                            formattedCount = tostring(currentEggCount):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
-                        end
+                    -- Check if we're at the top of the hour (:00) and should send hourly message
+                    local currentTime = os.date("*t")
+                    if currentTime.min == 0 and lastHourlyEggCount ~= nil then
+                        local currentHour = currentTime.hour
                         
-                        table.insert(webhookQueue, {
-                            message = string.format("%s is still hatching. Eggs Hatched: %s", p.Name, formattedCount),
-                            isPlainText = true,
-                            shouldPing = false
-                        })
-                        processWebhookQueue()
-                        lastHourlyNotification = os.time()
+                        -- Only send if we haven't sent a message for this hour yet
+                        if lastHourNotified ~= currentHour then
+                            -- Calculate eggs hatched since last hourly notification
+                            local eggsInPeriod = currentEggCount - lastHourlyEggCount
+                            
+                            -- Calculate actual minutes in period
+                            local minutesInPeriod = 60
+                            if lastHourNotified == nil and firstCheckTime ~= nil then
+                                -- First hourly message - calculate actual elapsed time
+                                minutesInPeriod = math.floor((os.time() - firstCheckTime) / 60)
+                            end
+                            
+                            -- Format numbers
+                            local formattedTotal = currentEggCount
+                            local formattedPeriod = eggsInPeriod
+                            if FormatCommas then
+                                formattedTotal = FormatCommas(currentEggCount)
+                                formattedPeriod = FormatCommas(eggsInPeriod)
+                            else
+                                formattedTotal = tostring(currentEggCount):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
+                                formattedPeriod = tostring(eggsInPeriod):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
+                            end
+                            
+                            -- Build message
+                            local message = string.format(
+                                "%s is still hatching.\n\nTotal Hatched: %s\n\nEggs hatched in the last %d minutes: %s",
+                                p.Name,
+                                formattedTotal,
+                                minutesInPeriod,
+                                formattedPeriod
+                            )
+                            
+                            table.insert(webhookQueue, {
+                                message = message,
+                                isPlainText = true,
+                                shouldPing = false
+                            })
+                            processWebhookQueue()
+                            
+                            -- Update tracking
+                            lastHourlyEggCount = currentEggCount
+                            lastHourNotified = currentHour
+                        end
                     end
                 else
                     -- Eggs did not increase - player is no longer hatching
