@@ -162,9 +162,8 @@ local function loadSettings()
                         riftDetectionEnabled = decoded.riftDetectionEnabled
                     end
                     -- Load rift auto-teleport settings
-                    if decoded.riftAutoTeleportEnabled ~= nil then
-                        riftAutoTeleportEnabled = decoded.riftAutoTeleportEnabled
-                    end
+                    -- NOTE: riftAutoTeleportEnabled is NOT saved/loaded - always defaults to false
+                    -- riftAutoTeleportEnabled = false (already set as default)
                     if decoded.riftPingEnabled ~= nil then
                         riftPingEnabled = decoded.riftPingEnabled
                     end
@@ -270,7 +269,7 @@ local function saveSettings()
             riftDetectionEnabled = riftDetectionEnabled,
             playerTrackingEnabled = playerTrackingEnabled,
             -- Save rift auto-teleport settings
-            riftAutoTeleportEnabled = riftAutoTeleportEnabled,
+            -- NOTE: riftAutoTeleportEnabled is NOT saved - always resets to false on reload
             riftPingEnabled = riftPingEnabled,
             riftSelections = riftSelections,
             eggCountMonitoringEnabled = eggCountMonitoringEnabled,
@@ -767,16 +766,24 @@ local function getDestinationPosition(rift)
     return nil
 end
 
--- Teleport player to position
-local function teleportToPosition(targetPosition, heightOffset)
+-- Teleport player to position (with callback support like working version)
+local function teleportToPosition(targetPosition, heightOffset, onArrival)
     local character = p.Character
-    if not character then return false end
+    if not character then 
+        if onArrival then onArrival() end
+        return false 
+    end
     
     local rootPart = character:FindFirstChild("HumanoidRootPart")
-    if not rootPart then return false end
+    if not rootPart then 
+        if onArrival then onArrival() end
+        return false 
+    end
     
     -- Apply height offset
     local adjustedPosition = targetPosition + Vector3.new(0, heightOffset or 15, 0)
+    
+    print("⚡ Teleporting to destination: " .. tostring(adjustedPosition))
     
     -- Disable collision temporarily
     for _, part in pairs(character:GetDescendants()) do
@@ -785,22 +792,72 @@ local function teleportToPosition(targetPosition, heightOffset)
         end
     end
     
-    -- Teleport
+    -- Teleport directly
     rootPart.CFrame = CFrame.new(adjustedPosition)
+    print("   CFrame set")
     
-    -- Re-enable collision after a brief delay (spawn to avoid blocking)
-    task.spawn(function()
-        task.wait(0.1)
-        if character and character.Parent then
-            for _, part in pairs(character:GetDescendants()) do
-                if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
-                    part.CanCollide = true
+    -- Wait a moment for physics to settle
+    task.wait(0.1)
+    
+    -- Re-enable collision and let player drop naturally
+    for _, part in pairs(character:GetDescendants()) do
+        if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+            part.CanCollide = true
+        end
+    end
+    
+    print("✓ Teleported - player will drop naturally")
+    
+    -- Call callback if provided
+    if onArrival then
+        onArrival()
+    end
+    
+    return true
+end
+
+-- Return to stored position (dedicated function like working version)
+local function returnToStoredPosition()
+    print("🔙 returnToStoredPosition() called")
+    
+    if not storedPosition then
+        print("✗ No stored position to return to")
+        return
+    end
+    
+    print("💾 Stored position: " .. tostring(storedPosition))
+    
+    returningFromRift = true
+    print("🔙 Teleporting to previous position...")
+    
+    teleportToPosition(storedPosition, 0, function()
+        print("✅ Teleport back completed, preparing summary...")
+        
+        -- Send summary notification
+        local displayName = "Rift"
+        if currentRift then
+            local riftName = string.lower(currentRift.Name)
+            for _, riftInfo in ipairs(AVAILABLE_RIFTS) do
+                if riftInfo.name == riftName then
+                    displayName = riftInfo.displayName
+                    break
                 end
             end
         end
+        
+        print("📊 Calling sendRiftSummary for: " .. displayName)
+        sendRiftSummary(displayName)
+        
+        -- Reset state after a brief delay
+        task.wait(0.5)
+        isAtRift = false
+        currentRift = nil
+        riftStartTime = nil
+        storedPosition = nil
+        returningFromRift = false
+        
+        print("✓ Returned to previous location and state reset")
     end)
-    
-    return true
 end
 
 -- Send rift arrival notification
@@ -838,6 +895,12 @@ end
 
 -- Send rift summary (mirrors admin abuse summary)
 local function sendRiftSummary(displayName)
+    print("📊 Preparing rift summary for " .. displayName)
+    
+    if not webhookURL or webhookURL == "" or not httpLib then
+        print("⚠ Rift summary skipped: webhookURL empty or httpLib unavailable")
+        return
+    end
     if #riftHatchedPets == 0 then
         -- Calculate eggs hatched
         local currentEggCount = getTotalEggsHatched()
@@ -849,22 +912,23 @@ local function sendRiftSummary(displayName)
         -- No pets but show eggs hatched
         local description = "Returned from **" .. displayName .. "**\n\n**Total Eggs Hatched:** " .. tostring(eggsHatchedDuringRift) .. "\n\nNo secrets or infinities were hatched."
         
-        table.insert(webhookQueue, {
-            payload = {
-                embeds = {{
-                    title = "🌀 Rift Complete",
-                    description = description,
-                    color = 10181046, -- Purple
-                    timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
-                }}
-            },
-            isCustomEmbed = true
-        })
-        processWebhookQueue()
-        
-        -- Reset tracking variables
-        riftStartEggCount = nil
-        return
+    table.insert(webhookQueue, {
+        payload = {
+            embeds = {{
+                title = "🌀 Rift Complete",
+                description = description,
+                color = 10181046, -- Purple
+                timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+            }}
+        },
+        isCustomEmbed = true
+    })
+    print("✅ Rift summary added to queue (no pets)")
+    processWebhookQueue()
+    
+    -- Reset tracking variables
+    riftStartEggCount = nil
+    return
     end
     
     -- Get player name
@@ -964,26 +1028,43 @@ local function sendRiftSummary(displayName)
         },
         isCustomEmbed = true
     })
-    
+    print("✅ Rift summary added to queue (with pets)")
     processWebhookQueue()
     
     -- Reset tracking variables
     riftStartEggCount = nil
 end
 
--- Handle rift detection
+-- Handle rift detection (matches working version logic)
 local function onRiftDetected(rift)
-    if not riftAutoTeleportEnabled or isAtRift or returningFromRift then
+    print("🔍 onRiftDetected called for: " .. tostring(rift.Name))
+    
+    if not riftAutoTeleportEnabled then
+        print("⏭ Rift auto-teleport is disabled")
+        return
+    end
+    
+    if isAtRift then
+        print("⚠ Already at a rift, ignoring: " .. rift.Name)
+        return
+    end
+    
+    if returningFromRift then
+        print("⚠ Currently returning from rift, ignoring: " .. rift.Name)
         return
     end
     
     -- Get rift name (not Type attribute - Type is just "Egg", "Chest", "Gift")
     local riftName = string.lower(rift.Name)
+    print("   Rift name (lowercase): " .. riftName)
     
     -- Check if this rift is selected
     if not riftSelections[riftName] then
+        print("⏭ Rift not selected, ignoring: " .. rift.Name)
         return
     end
+    
+    print("✅ Rift is selected, proceeding...")
     
     -- Get display name
     local displayName = riftName
@@ -998,10 +1079,13 @@ local function onRiftDetected(rift)
     local riftType = rift:GetAttribute("Type")
     
     -- Get rift position
+    print("🔍 Getting rift position...")
     local destination = getDestinationPosition(rift)
     if not destination then
+        print("✗ Could not determine rift position")
         return
     end
+    print("✅ Rift position found: " .. tostring(destination))
     
     -- Get rift duration
     local despawnAt = rift:GetAttribute("DespawnAt")
@@ -1018,104 +1102,80 @@ local function onRiftDetected(rift)
     
     -- Store current position and egg count
     local character = p.Character
-    if character and character:FindFirstChild("HumanoidRootPart") then
-        storedPosition = character.HumanoidRootPart.Position
+    if not character or not character:FindFirstChild("HumanoidRootPart") then
+        print("✗ Could not store current position (character missing)")
+        return
     end
+    
+    storedPosition = character.HumanoidRootPart.Position
+    print("💾 Stored current position: " .. tostring(storedPosition))
     
     -- Track starting egg count
     riftStartEggCount = getTotalEggsHatched()
     
-    -- Set state
-    isAtRift = true
+    -- Set state (will be confirmed after teleport completes)
     currentRift = rift
-    riftStartTime = tick()
     riftHatchedPets = {} -- Reset pet tracking
     
-    -- Teleport to rift
-    teleportToPosition(destination, 15)
-    
-    -- Send arrival notification
-    sendRiftArrivalNotification(displayName, duration, multiplier)
-    
-    -- Store rift reference for return callback
+    -- Store rift reference and name for return callback
     local riftRef = rift
     local riftNameForReturn = displayName
     
-    -- Monitor rift duration and handle return (using spawn + task.wait for reliability)
-    spawn(function()
-        print("⏱ Rift timer started: " .. math.floor(duration) .. " seconds for " .. displayName)
+    -- Teleport to rift (using callback pattern like working version)
+    teleportToPosition(destination, 15, function()
+        -- Set state AFTER successful teleport
+        isAtRift = true
+        riftStartTime = tick()
         
-        -- Wait for the duration
-        local startWait = tick()
-        task.wait(duration)
-        local actualWait = tick() - startWait
+        print("========================================")
+        print("✅ ARRIVED AT RIFT!")
+        print("   Name: " .. displayName)
+        print("   Duration: " .. math.floor(duration) .. "s")
+        if multiplier then
+            print("   Multiplier: " .. tostring(multiplier) .. "x Luck")
+        end
+        print("========================================")
         
-        print("⏰ Rift duration expired (waited " .. math.floor(actualWait) .. "s) for " .. displayName)
+        -- Send arrival notification (after teleport completes)
+        sendRiftArrivalNotification(displayName, duration, multiplier)
         
-        -- Check if we're still at this rift (user might have manually left or another rift triggered)
-        if isAtRift and currentRift == riftRef then
-            print("🔄 Returning to previous position from " .. displayName)
+        -- Monitor rift duration (start timer AFTER teleport completes)
+        spawn(function()
+            print("⏱ Starting rift timer for " .. math.floor(duration) .. " seconds")
             
-            -- Set returning flag to prevent new rift detection
-            returningFromRift = true
+            -- Wait for the actual duration
+            local startWait = tick()
+            task.wait(duration)
+            local actualWait = tick() - startWait
             
-            -- Return to previous position
-            if storedPosition then
-                local success = teleportToPosition(storedPosition, 0)
-                if success then
-                    print("✅ Successfully returned to previous position")
-                else
-                    print("⚠ Failed to teleport back (character may be missing)")
-                end
+            print("⏰ Rift duration expired (waited " .. math.floor(actualWait) .. "s)")
+            
+            -- Check if we're still at the rift (user might have cancelled)
+            -- Use simple truthy check like working version (more reliable than reference comparison)
+            if isAtRift and currentRift then
+                print("🔄 Initiating return to previous position...")
+                returnToStoredPosition()
             else
-                print("⚠ No stored position to return to")
+                print("⚠ Already left rift or operation cancelled: isAtRift=" .. tostring(isAtRift) .. ", currentRift=" .. tostring(currentRift ~= nil))
             end
-            
-            -- Send summary notification
-            sendRiftSummary(riftNameForReturn)
-            
-            -- Reset state after a brief delay
-            task.wait(0.5)
-            isAtRift = false
-            currentRift = nil
-            riftStartTime = nil
-            storedPosition = nil
-            returningFromRift = false
-            print("✅ Rift state reset complete")
-        else
-            print("⚠ Return cancelled: isAtRift=" .. tostring(isAtRift) .. ", currentRift match=" .. tostring(currentRift == riftRef))
-        end
-    end)
-    
-    -- Also monitor rift despawn (fallback in case duration calculation is wrong)
-    local riftConnection = nil
-    riftConnection = rift.AncestryChanged:Connect(function()
-        if not rift.Parent and isAtRift and currentRift == riftRef then
-            print("🔔 Rift despawned early, initiating return...")
-            riftConnection:Disconnect()
-            
-            -- Set returning flag
-            returningFromRift = true
-            
-            -- Return immediately
-            if storedPosition then
-                teleportToPosition(storedPosition, 0)
+        end)
+        
+        -- Also monitor rift despawn (fallback in case duration calculation is wrong)
+        local riftConnection = nil
+        riftConnection = rift.AncestryChanged:Connect(function()
+            if not rift.Parent and isAtRift and currentRift then
+                print("🔔 Rift despawned early, initiating return...")
+                if riftConnection then
+                    riftConnection:Disconnect()
+                end
+                returnToStoredPosition()
+            elseif not rift.Parent then
+                -- Rift despawned but we're not at it anymore, just disconnect
+                if riftConnection then
+                    riftConnection:Disconnect()
+                end
             end
-            
-            -- Send summary
-            sendRiftSummary(riftNameForReturn)
-            
-            -- Reset state
-            task.wait(0.5)
-            isAtRift = false
-            currentRift = nil
-            riftStartTime = nil
-            storedPosition = nil
-            returningFromRift = false
-        elseif not rift.Parent then
-            -- Rift despawned but we're not at it anymore, just disconnect
-            riftConnection:Disconnect()
-        end
+        end)
     end)
 end
 
@@ -3183,7 +3243,7 @@ riftMainToggleBtn.Activated:Connect(function()
     riftAutoTeleportEnabled = not riftAutoTeleportEnabled
     riftMainToggleBtn.BackgroundColor3 = riftAutoTeleportEnabled and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
     riftMainToggleBtn.Text = riftAutoTeleportEnabled and "Rift Detection: ON" or "Rift Detection: OFF"
-    saveSettings()
+    -- NOTE: riftAutoTeleportEnabled is NOT saved - always resets to false on reload
 end)
 
 -- ==================== ADMIN ABUSE TAB CONTENT ====================
@@ -4529,7 +4589,14 @@ end)
 -- RIFT DETECTION INITIALIZATION
 -- ============================================================
 
+-- Initialize rift monitoring (matches working version pattern)
+-- NOTE: This runs after modules are loaded (after task.wait(1) at line 2870)
 spawn(function()
+    -- Wait a bit to ensure everything else is initialized first
+    task.wait(2)
+    
+    print("🔍 Initializing rift detection...")
+    
     -- Wait for workspace to be ready
     local success, riftsFolder = pcall(function()
         return workspace:WaitForChild("Rendered", 10):WaitForChild("Rifts", 10)
@@ -4537,23 +4604,28 @@ spawn(function()
     
     if success and riftsFolder then
         print("✓ Rift detection initialized")
+        print("✓ Monitoring: workspace.Rendered.Rifts")
+        
+        -- Check for existing rifts (only log them, don't teleport - matches working version)
+        for _, rift in pairs(riftsFolder:GetChildren()) do
+            print("   Found existing rift: " .. rift.Name .. " (ignoring - only new rifts trigger teleport)")
+        end
         
         -- Listen for new rifts spawning
         riftsFolder.ChildAdded:Connect(function(rift)
-            if not scriptActive then return end
+            print("🎄 NEW RIFT SPAWNED: " .. rift.Name)
+            if not scriptActive then 
+                print("   Script not active, ignoring")
+                return 
+            end
             task.wait(0.1) -- Small delay to ensure rift attributes are loaded
             onRiftDetected(rift)
         end)
         
-        -- Check for existing rifts
-        for _, rift in pairs(riftsFolder:GetChildren()) do
-            task.spawn(function()
-                task.wait(0.1)
-                onRiftDetected(rift)
-            end)
-        end
+        print("✅ Rift monitoring active")
     else
         warn("⚠ Could not find Rifts folder in workspace")
+        print("⚠ Rift detection will not work!")
     end
 end)
 
