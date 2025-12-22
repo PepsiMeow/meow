@@ -134,7 +134,16 @@ local Services = {
     RunService = game:GetService("RunService")
 }
 
-local LocalPlayer = Services.Players.LocalPlayer
+-- Get LocalPlayer safely (may not be available immediately on mobile)
+local function GetLocalPlayer()
+    local success, player = pcall(function()
+        return Services.Players.LocalPlayer
+    end)
+    return success and player or nil
+end
+
+-- Try to get LocalPlayer, but it might be nil on mobile initially
+local LocalPlayer = GetLocalPlayer()
 
 -- ============================================================================
 -- SECTION 3: UTILITY FUNCTIONS
@@ -911,7 +920,12 @@ end
 
 -- Teleport to position
 function RiftManager.TeleportToPosition(targetPosition, heightOffset, onArrival)
-    local character = LocalPlayer.Character
+    local player = GetLocalPlayer()
+    if not player then
+        if onArrival then onArrival() end
+        return false
+    end
+    local character = player.Character
     if not character then
         if onArrival then onArrival() end
         return false
@@ -958,7 +972,8 @@ function RiftManager.SendArrivalNotification(displayName, duration, multiplier)
     local webhookURL = SettingsManager.Get("webhookURL")
     if not webhookURL or webhookURL == "" then return end
     
-    local playerName = LocalPlayer.Name or "Unknown Player"
+    local player = GetLocalPlayer()
+    local playerName = (player and player.Name) or "Unknown Player"
     local description = string.format("**%s** teleported to **%s**\n**Duration:** %d seconds", playerName, displayName, math.floor(duration))
     
     if multiplier then
@@ -1109,7 +1124,9 @@ function RiftManager.OnRiftDetected(rift)
         multiplier = rift:GetAttribute("BonusLuck")
     end
     
-    local character = LocalPlayer.Character
+    local player = GetLocalPlayer()
+    if not player then return end
+    local character = player.Character
     if not character or not character:FindFirstChild("HumanoidRootPart") then return end
     
     StateManager.storedPosition = character.HumanoidRootPart.Position
@@ -1273,7 +1290,8 @@ function WebhookFormatter.FormatPetNotification(data)
     local shouldPing = data.shouldPing or false
     local isInfinity = data.isInfinity or false
     
-    local playerName = LocalPlayer.Name or "Unknown Player"
+    local player = GetLocalPlayer()
+    local playerName = (player and player.Name) or "Unknown Player"
     local eggsHatched = EggHelper.GetTotalHatched()
     
     -- Build full pet name
@@ -1548,7 +1566,7 @@ function EggMonitor.Start()
                         HTTPClient.Queue({
                             webhookURL = SettingsManager.Get("webhookURL"),
                             isPlainText = true,
-                            message = string.format("%s is no longer hatching.", LocalPlayer.Name)
+                            message = string.format("%s is no longer hatching.", (GetLocalPlayer() and GetLocalPlayer().Name) or "Player")
                         })
                         EggMonitor.hasStoppedHatching = true
                     end
@@ -1596,9 +1614,10 @@ function EggMonitor.Start()
                                 local timeUnit = timeInPeriod >= 60 and "hours" or "minutes"
                                 local timeValue = timeInPeriod >= 60 and (timeInPeriod / 60) or timeInPeriod
                                 
+                                local player = GetLocalPlayer()
                                 local message = string.format(
                                     "%s is still hatching.\nTotal Hatched: %s\nEggs hatched in the last %d %s: %s",
-                                    LocalPlayer.Name,
+                                    (player and player.Name) or "Player",
                                     formattedTotal,
                                     timeValue,
                                     timeUnit,
@@ -1638,7 +1657,7 @@ function EggMonitor.Start()
                         HTTPClient.Queue({
                             webhookURL = SettingsManager.Get("webhookURL"),
                             isPlainText = true,
-                            message = string.format("%s is no longer hatching.", LocalPlayer.Name)
+                            message = string.format("%s is no longer hatching.", (GetLocalPlayer() and GetLocalPlayer().Name) or "Player")
                         })
                         EggMonitor.hasStoppedHatching = true
                     end
@@ -1769,12 +1788,19 @@ local GUIManager = {
 function GUIManager.Init()
     if GUIManager.initialized then return end
     
+    -- Get LocalPlayer safely
+    local player = GetLocalPlayer()
+    if not player then
+        warn("⚠ GUIManager: LocalPlayer not available")
+        return
+    end
+    
     -- Create ScreenGui
     local g = Instance.new("ScreenGui")
     g.Name = "BubblegumAutoHatch"
     g.ResetOnSpawn = false
     g.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    g.Parent = LocalPlayer.PlayerGui
+    g.Parent = player.PlayerGui
     
     -- Main frame
     local f = Instance.new("Frame")
@@ -1882,17 +1908,50 @@ end
 -- ============================================================================
 
 -- Initialize all systems
-task.wait(1) -- Wait for modules to load
+local initSuccess, initError = pcall(function()
+    local spawnFunc = spawn or task.spawn
+    spawnFunc(function()
+        -- Wait for LocalPlayer to be available (especially important on mobile)
+        local maxWait = 10
+        local waited = 0
+        local player = GetLocalPlayer()
+        while not player and waited < maxWait do
+            task.wait(0.1)
+            waited = waited + 0.1
+            player = GetLocalPlayer()
+        end
+        
+        if not player then
+            warn("⚠ LocalPlayer not available after " .. maxWait .. " seconds")
+            return
+        end
+        
+        -- Update global reference
+        LocalPlayer = player
+    
+    task.wait(1) -- Wait for modules to load
+    
+    -- Initialize core systems first
+    SettingsManager.Init()
+    HTTPClient.Init()
+    ModuleLoader.Load()
+    
+    -- Then initialize feature modules
+    PetDetector.Init()
+    RiftManager.Init()
+    EggMonitor.Start()
+    PlayerTracker.Init()
+    ChatMonitor.Init()
+    GUIManager.Init()
+    
+        print("========================================")
+        print("✓ All systems initialized")
+        print("Ready! Click 'Auto Hatch' to start")
+        print("========================================")
+    end)
+end)
 
-PetDetector.Init()
-RiftManager.Init()
-EggMonitor.Start()
-PlayerTracker.Init()
-ChatMonitor.Init()
-GUIManager.Init()
-
-print("========================================")
-print("✓ All systems initialized")
-print("Ready! Click 'Auto Hatch' to start")
-print("========================================")
+if not initSuccess then
+    warn("⚠ Failed to initialize script: " .. tostring(initError))
+end
 
