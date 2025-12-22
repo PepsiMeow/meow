@@ -78,6 +78,41 @@ local xlPingEnabled = false -- Default OFF
 local legendaryDetectionEnabled = false -- Default OFF
 local legendaryPingEnabled = false -- Default OFF
 
+-- Rift Auto-Teleport Settings
+local riftAutoTeleportEnabled = false -- Master toggle for rift detection
+local riftPingEnabled = false -- Whether to ping on rift notifications
+local riftSelections = {
+    ["peppermint-chest"] = true,
+    ["gingerbread-egg"] = true,
+    ["candycane-egg"] = true,
+    ["yuletide-egg"] = true,
+    ["northpole-egg"] = true,
+    ["aurora-egg"] = true,
+    ["festive-egg"] = true,
+    ["2026-egg"] = true
+}
+
+-- Rift state tracking
+local isAtRift = false
+local currentRift = nil
+local riftStartTime = nil
+local storedPosition = nil
+local returningFromRift = false
+local riftHatchedPets = {} -- Tracks all secrets/infinities during rift (mirrors admin abuse)
+local riftStartEggCount = nil -- Track eggs at start of rift
+
+-- Available rifts
+local AVAILABLE_RIFTS = {
+    {name = "peppermint-chest", displayName = "Peppermint Chest", category = "Chest"},
+    {name = "gingerbread-egg", displayName = "Gingerbread Egg", category = "Egg"},
+    {name = "candycane-egg", displayName = "Candycane Egg", category = "Egg"},
+    {name = "yuletide-egg", displayName = "Yuletide Egg", category = "Egg"},
+    {name = "northpole-egg", displayName = "Northpole Egg", category = "Egg"},
+    {name = "aurora-egg", displayName = "Aurora Egg", category = "Egg"},
+    {name = "festive-egg", displayName = "Festive Egg", category = "Egg"},
+    {name = "2026-egg", displayName = "2026 Egg", category = "Egg"}
+}
+
 -- Admin Abuse Mode
 local adminAbuseActive = false
 local adminAbuseSecretSettings = {
@@ -106,6 +141,7 @@ local SETTINGS_FILE = "bubblegum_settings.json"
 -- Load settings from file (non-blocking, won't break if it fails)
 local function loadSettings()
     if not readfile or not isfile or not HttpService then
+        print("⚠ Cannot load settings: File system not available, using defaults")
         return -- File system not available, use defaults
     end
     
@@ -124,6 +160,16 @@ local function loadSettings()
                     -- Load toggle states
                     if decoded.riftDetectionEnabled ~= nil then
                         riftDetectionEnabled = decoded.riftDetectionEnabled
+                    end
+                    -- Load rift auto-teleport settings
+                    if decoded.riftAutoTeleportEnabled ~= nil then
+                        riftAutoTeleportEnabled = decoded.riftAutoTeleportEnabled
+                    end
+                    if decoded.riftPingEnabled ~= nil then
+                        riftPingEnabled = decoded.riftPingEnabled
+                    end
+                    if decoded.riftSelections and type(decoded.riftSelections) == "table" then
+                        riftSelections = decoded.riftSelections
                     end
                     if decoded.playerTrackingEnabled ~= nil then
                         playerTrackingEnabled = decoded.playerTrackingEnabled
@@ -203,23 +249,30 @@ local function loadSettings()
     end)
     
     if not success then
-        -- Silently fail, use defaults
+        print("⚠ Failed to load settings (using defaults): " .. tostring(result))
+    elseif not result then
+        print("⚠ No settings file found, using defaults")
     end
 end
 
 -- Save settings to file (non-blocking, won't break if it fails)
 local function saveSettings()
     if not writefile or not HttpService then
+        print("⚠ Cannot save settings: File system not available")
         return -- File system not available, skip saving
     end
     
-    pcall(function()
+    local success, err = pcall(function()
         local settings = {
             webhookURL = webhookURL or "",
             discordUserID = discordUserID or "",
             -- Save toggle states
             riftDetectionEnabled = riftDetectionEnabled,
             playerTrackingEnabled = playerTrackingEnabled,
+            -- Save rift auto-teleport settings
+            riftAutoTeleportEnabled = riftAutoTeleportEnabled,
+            riftPingEnabled = riftPingEnabled,
+            riftSelections = riftSelections,
             eggCountMonitoringEnabled = eggCountMonitoringEnabled,
             eggMonitorIntervalHours = eggMonitorIntervalHours,
             -- Save granular secret detection settings
@@ -249,8 +302,13 @@ local function saveSettings()
         }
         local json = HttpService:JSONEncode(settings)
         writefile(SETTINGS_FILE, json)
-        print("✓ Settings saved")
     end)
+    
+    if success then
+        print("✓ Settings saved")
+    else
+        print("✗ Failed to save settings: " .. tostring(err))
+    end
 end
 
 -- Webhook queue for rate limiting
@@ -607,6 +665,396 @@ local function getTotalEggsHatched()
         or data.Stats["🥚 Hatches"]
     
     return hatches
+end
+
+-- ============================================================
+-- RIFT AUTO-TELEPORT FUNCTIONS
+-- ============================================================
+
+-- Get rift destination position
+local function getDestinationPosition(rift)
+    local riftType = rift:GetAttribute("Type") or "unknown"
+    
+    -- For Chest rifts, prioritize the actual chest object
+    if riftType == "Chest" then
+        local chest = rift:FindFirstChild("Chest")
+        if chest then
+            -- Try to find Prompt's parent (the actual chest part)
+            if chest:FindFirstChild("Prompt") then
+                local prompt = chest.Prompt
+                if prompt.Parent and prompt.Parent:IsA("BasePart") then
+                    return prompt.Parent.Position
+                end
+            end
+            -- Fallback: Use Chest if it's a BasePart
+            if chest:IsA("BasePart") then
+                return chest.Position
+            end
+            -- Fallback: Use PrimaryPart or first child part
+            if chest.PrimaryPart then
+                return chest.PrimaryPart.Position
+            end
+            for _, child in pairs(chest:GetChildren()) do
+                if child:IsA("BasePart") and child.Name ~= "Display" then
+                    return child.Position
+                end
+            end
+        end
+    end
+    
+    -- For Gift rifts, prioritize the actual gift object
+    if riftType == "Gift" then
+        local gift = rift:FindFirstChild("Gift")
+        if gift then
+            -- Try to find Prompt's parent (the actual gift part)
+            if gift:FindFirstChild("Prompt") then
+                local prompt = gift.Prompt
+                if prompt.Parent and prompt.Parent:IsA("BasePart") then
+                    return prompt.Parent.Position
+                end
+            end
+            -- Fallback: Use Gift if it's a BasePart
+            if gift:IsA("BasePart") then
+                return gift.Position
+            end
+            -- Fallback: Use PrimaryPart or first child part
+            if gift.PrimaryPart then
+                return gift.PrimaryPart.Position
+            end
+            for _, child in pairs(gift:GetChildren()) do
+                if child:IsA("BasePart") and child.Name ~= "Display" then
+                    return child.Position
+                end
+            end
+        end
+    end
+    
+    -- For Egg rifts, find the egg object (may be named various things)
+    if riftType == "Egg" then
+        -- Try to find specific egg parts
+        for _, child in pairs(rift:GetDescendants()) do
+            if child:IsA("BasePart") then
+                local childName = string.lower(child.Name)
+                if childName:find("egg") or childName:find("root") or childName:find("prompt") then
+                    return child.Position
+                end
+            end
+        end
+        
+        -- Fallback to PivotPosition for egg rifts
+        local pivotCF = rift:GetPivot()
+        if pivotCF then
+            return pivotCF.Position
+        end
+    end
+    
+    -- Last resort: try Display sign (but this is often offset)
+    local display = rift:FindFirstChild("Display")
+    if display and display.Position then
+        return display.Position
+    end
+    
+    -- Ultimate fallback
+    if rift.PrimaryPart then
+        return rift.PrimaryPart.Position
+    elseif rift:IsA("Model") then
+        local pivotCF = rift:GetPivot()
+        if pivotCF then
+            return pivotCF.Position
+        end
+    end
+    
+    return nil
+end
+
+-- Teleport player to position
+local function teleportToPosition(targetPosition, heightOffset)
+    local character = p.Character
+    if not character then return false end
+    
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return false end
+    
+    -- Apply height offset
+    local adjustedPosition = targetPosition + Vector3.new(0, heightOffset or 15, 0)
+    
+    -- Disable collision temporarily
+    for _, part in pairs(character:GetDescendants()) do
+        if part:IsA("BasePart") then
+            part.CanCollide = false
+        end
+    end
+    
+    -- Teleport
+    rootPart.CFrame = CFrame.new(adjustedPosition)
+    
+    -- Re-enable collision after a brief delay (spawn to avoid blocking)
+    task.spawn(function()
+        task.wait(0.1)
+        if character and character.Parent then
+            for _, part in pairs(character:GetDescendants()) do
+                if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+                    part.CanCollide = true
+                end
+            end
+        end
+    end)
+    
+    return true
+end
+
+-- Send rift arrival notification
+local function sendRiftArrivalNotification(displayName, duration, multiplier)
+    if webhookURL == "" or not httpLib then return end
+    
+    local playerName = p.Name or "Unknown Player"
+    local durationText = string.format("%.0f", duration) .. "s"
+    local multiplierText = multiplier and (" **|** " .. tostring(multiplier) .. "x Luck") or ""
+    
+    local description = "**" .. playerName .. "** teleported to **" .. displayName .. "**" .. multiplierText .. "\n**Duration:** " .. durationText
+    
+    local mention = ""
+    if riftPingEnabled and discordUserID ~= "" then
+        mention = "<@" .. discordUserID .. ">"
+    end
+    
+    table.insert(webhookQueue, {
+        payload = {
+            content = mention ~= "" and mention or nil,
+            embeds = {{
+                title = "🌀 Rift Detected",
+                description = description,
+                color = 3447003, -- Blue color
+                timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+            }}
+        },
+        isCustomEmbed = true
+    })
+    processWebhookQueue()
+end
+
+-- Send rift summary (mirrors admin abuse summary)
+local function sendRiftSummary(displayName)
+    if #riftHatchedPets == 0 then
+        -- Calculate eggs hatched
+        local currentEggCount = getTotalEggsHatched()
+        local eggsHatchedDuringRift = 0
+        if riftStartEggCount and currentEggCount then
+            eggsHatchedDuringRift = currentEggCount - riftStartEggCount
+        end
+        
+        -- No pets but show eggs hatched
+        local description = "Returned from **" .. displayName .. "**\n\n**Total Eggs Hatched:** " .. tostring(eggsHatchedDuringRift) .. "\n\nNo secrets or infinities were hatched."
+        
+        table.insert(webhookQueue, {
+            payload = {
+                embeds = {{
+                    title = "🌀 Rift Complete",
+                    description = description,
+                    color = 10181046, -- Purple
+                    timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+                }}
+            },
+            isCustomEmbed = true
+        })
+        processWebhookQueue()
+        
+        -- Reset tracking variables
+        riftStartEggCount = nil
+        return
+    end
+    
+    -- Get player name
+    local playerName = p.Name or "Unknown Player"
+    
+    -- Calculate eggs hatched during rift
+    local currentEggCount = getTotalEggsHatched()
+    local eggsHatchedDuringRift = 0
+    if riftStartEggCount and currentEggCount then
+        eggsHatchedDuringRift = currentEggCount - riftStartEggCount
+    end
+    
+    -- Sort pets by hierarchy and rarity (same as admin abuse)
+    table.sort(riftHatchedPets, function(a, b)
+        -- First sort by infinity (infinities first)
+        if a.isInfinity and not b.isInfinity then return true end
+        if not a.isInfinity and b.isInfinity then return false end
+        
+        -- Then sort by variant hierarchy
+        local aHierarchy = getVariantHierarchy(a.shiny, a.mythic, a.xl)
+        local bHierarchy = getVariantHierarchy(b.shiny, b.mythic, b.xl)
+        if aHierarchy ~= bHierarchy then
+            return aHierarchy > bHierarchy
+        end
+        
+        -- Then sort by rarity (higher rarity first)
+        local aRarity = getPetRarityValue(a.pet)
+        local bRarity = getPetRarityValue(b.pet)
+        return aRarity > bRarity
+    end)
+    
+    -- Count pets by name and variant
+    local petCounts = {}
+    for _, petData in ipairs(riftHatchedPets) do
+        local variantName = getVariantName(petData.shiny, petData.mythic, petData.xl)
+        local fullName = variantName .. petData.name
+        
+        if not petCounts[fullName] then
+            petCounts[fullName] = {
+                count = 0,
+                rarity = getPetRarityValue(petData.pet),
+                hierarchy = getVariantHierarchy(petData.shiny, petData.mythic, petData.xl),
+                isInfinity = petData.isInfinity,
+                shiny = petData.shiny,
+                mythic = petData.mythic,
+                xl = petData.xl
+            }
+        end
+        petCounts[fullName].count = petCounts[fullName].count + 1
+    end
+    
+    -- Convert to sorted array
+    local sortedPets = {}
+    for fullName, data in pairs(petCounts) do
+        table.insert(sortedPets, {
+            name = fullName,
+            count = data.count,
+            rarity = data.rarity,
+            hierarchy = data.hierarchy,
+            isInfinity = data.isInfinity,
+            shiny = data.shiny,
+            mythic = data.mythic,
+            xl = data.xl
+        })
+    end
+    
+    -- Sort the array (same logic as above)
+    table.sort(sortedPets, function(a, b)
+        if a.isInfinity and not b.isInfinity then return true end
+        if not a.isInfinity and b.isInfinity then return false end
+        if a.hierarchy ~= b.hierarchy then
+            return a.hierarchy > b.hierarchy
+        end
+        return a.rarity > b.rarity
+    end)
+    
+    -- Build pet list string
+    local petListText = ""
+    for _, petData in ipairs(sortedPets) do
+        local countText = petData.count > 1 and (" x" .. tostring(petData.count)) or ""
+        petListText = petListText .. "• " .. petData.name .. countText .. "\n"
+    end
+    
+    -- Build description
+    local description = "Returned from **" .. displayName .. "**\n\n" ..
+                      "**Total Eggs Hatched:** " .. tostring(eggsHatchedDuringRift) .. "\n\n" ..
+                      "**Pets Hatched:**\n" .. petListText
+    
+    table.insert(webhookQueue, {
+        payload = {
+            embeds = {{
+                title = "🌀 Rift Complete",
+                description = description,
+                color = 10181046, -- Purple
+                timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+            }}
+        },
+        isCustomEmbed = true
+    })
+    
+    processWebhookQueue()
+    
+    -- Reset tracking variables
+    riftStartEggCount = nil
+end
+
+-- Handle rift detection
+local function onRiftDetected(rift)
+    if not riftAutoTeleportEnabled or isAtRift or returningFromRift then
+        return
+    end
+    
+    -- Get rift name (not Type attribute - Type is just "Egg", "Chest", "Gift")
+    local riftName = string.lower(rift.Name)
+    
+    -- Check if this rift is selected
+    if not riftSelections[riftName] then
+        return
+    end
+    
+    -- Get display name
+    local displayName = riftName
+    for _, riftInfo in ipairs(AVAILABLE_RIFTS) do
+        if riftInfo.name == riftName then
+            displayName = riftInfo.displayName
+            break
+        end
+    end
+    
+    -- Get rift type for position detection and multiplier
+    local riftType = rift:GetAttribute("Type")
+    
+    -- Get rift position
+    local destination = getDestinationPosition(rift)
+    if not destination then
+        return
+    end
+    
+    -- Get rift duration
+    local despawnAt = rift:GetAttribute("DespawnAt")
+    local duration = 600 -- Default 10 minutes
+    if despawnAt then
+        duration = math.max(0, despawnAt - workspace:GetServerTimeNow())
+    end
+    
+    -- Get multiplier if egg rift
+    local multiplier = nil
+    if riftType == "Egg" then
+        multiplier = rift:GetAttribute("BonusLuck")
+    end
+    
+    -- Store current position and egg count
+    local character = p.Character
+    if character and character:FindFirstChild("HumanoidRootPart") then
+        storedPosition = character.HumanoidRootPart.Position
+    end
+    
+    -- Track starting egg count
+    riftStartEggCount = getTotalEggsHatched()
+    
+    -- Set state
+    isAtRift = true
+    currentRift = rift
+    riftStartTime = tick()
+    riftHatchedPets = {} -- Reset pet tracking
+    
+    -- Teleport to rift
+    teleportToPosition(destination, 15)
+    
+    -- Send arrival notification
+    sendRiftArrivalNotification(displayName, duration, multiplier)
+    
+    -- Schedule return
+    task.delay(duration, function()
+        if currentRift == rift and isAtRift then
+            -- Return to previous position
+            returningFromRift = true
+            if storedPosition then
+                teleportToPosition(storedPosition, 0)
+            end
+            
+            -- Send summary notification
+            sendRiftSummary(displayName)
+            
+            -- Reset state
+            task.wait(1)
+            isAtRift = false
+            currentRift = nil
+            riftStartTime = nil
+            storedPosition = nil
+            returningFromRift = false
+        end
+    end)
 end
 
 -- Function to send special webhook (with infinity colors and message)
@@ -1816,6 +2264,19 @@ local function connectToEvents()
                                             })
                                         end
                                         
+                                        -- Track for rift summary
+                                        if isAtRift then
+                                            table.insert(riftHatchedPets, {
+                                                name = petName,
+                                                shiny = shiny,
+                                                mythic = mythic,
+                                                xl = xl,
+                                                rarity = rarity,
+                                                isInfinity = true,
+                                                pet = pet
+                                            })
+                                        end
+                                        
                                         sendPetNotification(petName, shiny, mythic, xl, eggName, rarity, pet, "infinity", shouldPing)
                                         print(">>> INFINITY PET DETECTED! <<<")
                                     end
@@ -1824,6 +2285,17 @@ local function connectToEvents()
                                 elseif isSecret then
                                     local shouldNotify = false
                                     local shouldPing = false
+                                    
+                                    -- DEBUG: Log secret detection
+                                    print("🔍 SECRET DETECTED - Analyzing...")
+                                    print("   Pet: " .. tostring(petName))
+                                    print("   Shiny: " .. tostring(shiny))
+                                    print("   Mythic: " .. tostring(mythic))
+                                    print("   XL: " .. tostring(xl))
+                                    print("   Settings - notifyNormal: " .. tostring(activeSettings.notifyNormal))
+                                    print("   Settings - notifyShiny: " .. tostring(activeSettings.notifyShiny))
+                                    print("   Settings - notifyMythic: " .. tostring(activeSettings.notifyMythic))
+                                    print("   Settings - filterUnder1B: " .. tostring(activeSettings.filterUnder1B))
                                     
                                     -- Cascading detection logic
                                     -- Check exact match first, then cascade
@@ -1863,14 +2335,21 @@ local function connectToEvents()
                                         -- Shiny: triggered by Shiny
                                         shouldNotify = activeSettings.notifyShiny
                                         shouldPing = activeSettings.pingShiny
+                                        print("   → Detected as: Shiny Secret")
                                     else
                                         -- Normal: triggered by Normal
                                         shouldNotify = activeSettings.notifyNormal
                                         shouldPing = activeSettings.pingNormal
+                                        print("   → Detected as: Normal Secret")
                                     end
                                     
+                                    print("   shouldNotify (before filter): " .. tostring(shouldNotify))
+                                    print("   shouldPing: " .. tostring(shouldPing))
+                                    
                                     -- Apply <1B filter
+                                    print("   Checking filter...")
                                     if shouldNotify and activeSettings.filterUnder1B then
+                                        print("   → Filter is ON, checking rarity...")
                                         -- Check if pet is under 1B
                                         if PetUtil and pet then
                                             local success, petChance = pcall(function()
@@ -1900,10 +2379,17 @@ local function connectToEvents()
                                                     -- If no enabled variant, skip notification
                                                     if not hasEnabledVariant then
                                                         shouldNotify = false
+                                                        print("   → Filter BLOCKED (no enabled variant for <1B)")
+                                                    else
+                                                        print("   → Filter PASSED (has enabled variant)")
                                                     end
+                                                else
+                                                    print("   → Rarity is ≥1B, filter passed")
                                                 end
                                             end
                                         end
+                                    else
+                                        print("   → Filter is OFF or shouldNotify is false, skipping filter")
                                     end
                                     
                                     -- Track for admin abuse summary (always track, even if not notifying)
@@ -1919,9 +2405,28 @@ local function connectToEvents()
                                         })
                                     end
                                     
+                                    -- Track for rift summary (always track, even if not notifying)
+                                    if isAtRift then
+                                        table.insert(riftHatchedPets, {
+                                            name = petName,
+                                            shiny = shiny,
+                                            mythic = mythic,
+                                            xl = xl,
+                                            rarity = rarity,
+                                            isInfinity = false,
+                                            pet = pet
+                                        })
+                                    end
+                                    
+                                    print("   FINAL shouldNotify: " .. tostring(shouldNotify))
+                                    print("   FINAL shouldPing: " .. tostring(shouldPing))
+                                    
                                     if shouldNotify then
+                                        print("   ✅ SENDING NOTIFICATION...")
                                         sendPetNotification(petName, shiny, mythic, xl, eggName, rarity, pet, "secret", shouldPing)
                                         print(">>> SECRET DETECTED! <<<")
+                                    else
+                                        print("   ❌ NOTIFICATION BLOCKED (shouldNotify = false)")
                                     end
                                 
                                 -- Priority 3: XL pets (non-secret)
@@ -2301,10 +2806,22 @@ detectionTab.Font = Enum.Font.GothamBold
 detectionTab.BorderSizePixel = 0
 detectionTab.Parent = tabContainer
 
--- Admin Abuse tab button (new)
+-- Rifts tab button (new)
+local riftsTab = Instance.new("TextButton")
+riftsTab.Size = UDim2.new(1, 0, 0, 50)
+riftsTab.Position = UDim2.new(0, 0, 0, 100)
+riftsTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+riftsTab.Text = "Rifts"
+riftsTab.TextColor3 = Color3.fromRGB(255, 255, 255)
+riftsTab.TextSize = 12
+riftsTab.Font = Enum.Font.GothamBold
+riftsTab.BorderSizePixel = 0
+riftsTab.Parent = tabContainer
+
+-- Admin Abuse tab button
 local adminAbuseTab = Instance.new("TextButton")
 adminAbuseTab.Size = UDim2.new(1, 0, 0, 50)
-adminAbuseTab.Position = UDim2.new(0, 0, 0, 100)
+adminAbuseTab.Position = UDim2.new(0, 0, 0, 150)
 adminAbuseTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 adminAbuseTab.Text = "Admin Abuse"
 adminAbuseTab.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -2316,7 +2833,7 @@ adminAbuseTab.Parent = tabContainer
 -- Extra tab button
 local extraTab = Instance.new("TextButton")
 extraTab.Size = UDim2.new(1, 0, 0, 50)
-extraTab.Position = UDim2.new(0, 0, 0, 150)
+extraTab.Position = UDim2.new(0, 0, 0, 200)
 extraTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 extraTab.Text = "Extra"
 extraTab.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -2338,6 +2855,13 @@ detectionContent.Size = UDim2.new(1, 0, 1, 0)
 detectionContent.BackgroundTransparency = 1
 detectionContent.Visible = false
 detectionContent.Parent = contentContainer
+
+-- Rifts content frame (new)
+local riftsContent = Instance.new("Frame")
+riftsContent.Size = UDim2.new(1, 0, 1, 0)
+riftsContent.BackgroundTransparency = 1
+riftsContent.Visible = false
+riftsContent.Parent = contentContainer
 
 -- Admin Abuse content frame
 local adminAbuseContent = Instance.new("Frame")
@@ -2509,6 +3033,89 @@ legendaryPingDesc.TextXAlignment = Enum.TextXAlignment.Left
 legendaryPingDesc.TextYAlignment = Enum.TextYAlignment.Top
 legendaryPingDesc.TextWrapped = true
 legendaryPingDesc.Parent = detectionContent
+
+-- ==================== RIFTS TAB CONTENT ====================
+
+-- Rifts title
+local riftsTitle = Instance.new("TextLabel")
+riftsTitle.Size = UDim2.new(1, 0, 0, 40)
+riftsTitle.Position = UDim2.new(0, 0, 0, 0)
+riftsTitle.BackgroundColor3 = Color3.fromRGB(60, 120, 200)
+riftsTitle.Text = "Rift Auto-Teleport Settings"
+riftsTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+riftsTitle.TextSize = 16
+riftsTitle.Font = Enum.Font.GothamBold
+riftsTitle.BorderSizePixel = 0
+riftsTitle.Parent = riftsContent
+
+-- Main rift detection toggle button (full width)
+local riftMainToggleBtn = Instance.new("TextButton")
+riftMainToggleBtn.Size = UDim2.new(0, 330, 0, 50)
+riftMainToggleBtn.Position = UDim2.new(0, 15, 0, 50)
+riftMainToggleBtn.BackgroundColor3 = riftAutoTeleportEnabled and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+riftMainToggleBtn.Text = riftAutoTeleportEnabled and "Rift Detection: ON" or "Rift Detection: OFF"
+riftMainToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+riftMainToggleBtn.TextSize = 16
+riftMainToggleBtn.Font = Enum.Font.GothamBold
+riftMainToggleBtn.BorderSizePixel = 0
+riftMainToggleBtn.Parent = riftsContent
+
+-- Rift selection label
+local riftSelectionLabel = Instance.new("TextLabel")
+riftSelectionLabel.Size = UDim2.new(1, -30, 0, 25)
+riftSelectionLabel.Position = UDim2.new(0, 15, 0, 110)
+riftSelectionLabel.BackgroundTransparency = 1
+riftSelectionLabel.Text = "Select Rifts to Hunt:"
+riftSelectionLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+riftSelectionLabel.TextSize = 14
+riftSelectionLabel.Font = Enum.Font.GothamBold
+riftSelectionLabel.TextXAlignment = Enum.TextXAlignment.Left
+riftSelectionLabel.Parent = riftsContent
+
+-- Rift checkboxes (2 columns x 4 rows)
+local riftButtons = {}
+local buttonWidth = 160
+local buttonHeight = 35
+local spacing = 5
+local startX = 15
+local startY = 140
+
+for i, riftInfo in ipairs(AVAILABLE_RIFTS) do
+    local row = math.floor((i - 1) / 2)
+    local col = (i - 1) % 2
+    
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0, buttonWidth, 0, buttonHeight)
+    btn.Position = UDim2.new(0, startX + col * (buttonWidth + spacing), 0, startY + row * (buttonHeight + spacing))
+    btn.BackgroundColor3 = riftSelections[riftInfo.name] and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    btn.Text = riftInfo.displayName
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.TextSize = 11
+    btn.Font = Enum.Font.GothamBold
+    btn.BorderSizePixel = 0
+    btn.Parent = riftsContent
+    
+    riftButtons[riftInfo.name] = btn
+    
+    -- Button click handler
+    btn.Activated:Connect(function()
+        if not scriptActive then return end
+        
+        riftSelections[riftInfo.name] = not riftSelections[riftInfo.name]
+        btn.BackgroundColor3 = riftSelections[riftInfo.name] and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+        saveSettings()
+    end)
+end
+
+-- Main toggle button handler
+riftMainToggleBtn.Activated:Connect(function()
+    if not scriptActive then return end
+    
+    riftAutoTeleportEnabled = not riftAutoTeleportEnabled
+    riftMainToggleBtn.BackgroundColor3 = riftAutoTeleportEnabled and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    riftMainToggleBtn.Text = riftAutoTeleportEnabled and "Rift Detection: ON" or "Rift Detection: OFF"
+    saveSettings()
+end)
 
 -- ==================== ADMIN ABUSE TAB CONTENT ====================
 
@@ -2745,30 +3352,30 @@ intervalDesc.TextYAlignment = Enum.TextYAlignment.Top
 intervalDesc.TextWrapped = true
 intervalDesc.Parent = extraContent
 
--- Rift detection button (middle-left)
-local riftBtn = Instance.new("TextButton")
-riftBtn.Size = UDim2.new(0, 155, 0, 28)
-riftBtn.Position = UDim2.new(0, 15, 0, 110)
-riftBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-riftBtn.Text = "Rift Detection: OFF"
-riftBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-riftBtn.TextSize = 11
-riftBtn.Font = Enum.Font.GothamBold
-riftBtn.BorderSizePixel = 0
-riftBtn.Parent = extraContent
+-- Rift ping button (middle-left)
+local riftPingBtn = Instance.new("TextButton")
+riftPingBtn.Size = UDim2.new(0, 155, 0, 28)
+riftPingBtn.Position = UDim2.new(0, 15, 0, 110)
+riftPingBtn.BackgroundColor3 = riftPingEnabled and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+riftPingBtn.Text = riftPingEnabled and "Rift Pings: ON" or "Rift Pings: OFF"
+riftPingBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+riftPingBtn.TextSize = 11
+riftPingBtn.Font = Enum.Font.GothamBold
+riftPingBtn.BorderSizePixel = 0
+riftPingBtn.Parent = extraContent
 
-local riftDesc = Instance.new("TextLabel")
-riftDesc.Size = UDim2.new(0, 155, 0, 22)
-riftDesc.Position = UDim2.new(0, 15, 0, 142)
-riftDesc.BackgroundTransparency = 1
-riftDesc.Text = "Detects Christmas Chest Rifts and pings you"
-riftDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
-riftDesc.TextSize = 8
-riftDesc.Font = Enum.Font.Gotham
-riftDesc.TextXAlignment = Enum.TextXAlignment.Left
-riftDesc.TextYAlignment = Enum.TextYAlignment.Top
-riftDesc.TextWrapped = true
-riftDesc.Parent = extraContent
+local riftPingDesc = Instance.new("TextLabel")
+riftPingDesc.Size = UDim2.new(0, 155, 0, 22)
+riftPingDesc.Position = UDim2.new(0, 15, 0, 142)
+riftPingDesc.BackgroundTransparency = 1
+riftPingDesc.Text = "Pings you when a selected rift is detected"
+riftPingDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
+riftPingDesc.TextSize = 8
+riftPingDesc.Font = Enum.Font.Gotham
+riftPingDesc.TextXAlignment = Enum.TextXAlignment.Left
+riftPingDesc.TextYAlignment = Enum.TextYAlignment.Top
+riftPingDesc.TextWrapped = true
+riftPingDesc.Parent = extraContent
 
 -- Player tracking button (middle-right)
 local playerBtn = Instance.new("TextButton")
@@ -3010,12 +3617,14 @@ local adminSecretButtons, adminSecretBackBtn = createSecretSettingsMenu(adminSec
 hatchingTab.Activated:Connect(function()
     hatchingContent.Visible = true
     detectionContent.Visible = false
+    riftsContent.Visible = false
     adminAbuseContent.Visible = false
     extraContent.Visible = false
     secretSettingsMenu.Visible = false
     adminSecretSettingsMenu.Visible = false
     hatchingTab.BackgroundColor3 = Color3.fromRGB(60, 120, 200)
     detectionTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    riftsTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
     adminAbuseTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
     extraTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 end)
@@ -3023,12 +3632,29 @@ end)
 detectionTab.Activated:Connect(function()
     hatchingContent.Visible = false
     detectionContent.Visible = true
+    riftsContent.Visible = false
     adminAbuseContent.Visible = false
     extraContent.Visible = false
     secretSettingsMenu.Visible = false
     adminSecretSettingsMenu.Visible = false
     hatchingTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
     detectionTab.BackgroundColor3 = Color3.fromRGB(60, 120, 200)
+    riftsTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    adminAbuseTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    extraTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+end)
+
+riftsTab.Activated:Connect(function()
+    hatchingContent.Visible = false
+    detectionContent.Visible = false
+    riftsContent.Visible = true
+    adminAbuseContent.Visible = false
+    extraContent.Visible = false
+    secretSettingsMenu.Visible = false
+    adminSecretSettingsMenu.Visible = false
+    hatchingTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    detectionTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    riftsTab.BackgroundColor3 = Color3.fromRGB(60, 120, 200)
     adminAbuseTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
     extraTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 end)
@@ -3036,12 +3662,14 @@ end)
 adminAbuseTab.Activated:Connect(function()
     hatchingContent.Visible = false
     detectionContent.Visible = false
+    riftsContent.Visible = false
     adminAbuseContent.Visible = true
     extraContent.Visible = false
     secretSettingsMenu.Visible = false
     adminSecretSettingsMenu.Visible = false
     hatchingTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
     detectionTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    riftsTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
     adminAbuseTab.BackgroundColor3 = Color3.fromRGB(60, 120, 200)
     extraTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 end)
@@ -3049,12 +3677,14 @@ end)
 extraTab.Activated:Connect(function()
     hatchingContent.Visible = false
     detectionContent.Visible = false
+    riftsContent.Visible = false
     adminAbuseContent.Visible = false
     extraContent.Visible = true
     secretSettingsMenu.Visible = false
     adminSecretSettingsMenu.Visible = false
     hatchingTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
     detectionTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    riftsTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
     adminAbuseTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
     extraTab.BackgroundColor3 = Color3.fromRGB(60, 120, 200)
 end)
@@ -3087,17 +3717,17 @@ autoHatchBtn.Activated:Connect(function()
 end)
 
 -- Rift detection toggle
-riftBtn.Activated:Connect(function()
+riftPingBtn.Activated:Connect(function()
     if not scriptActive then return end
     
-    riftDetectionEnabled = not riftDetectionEnabled
+    riftPingEnabled = not riftPingEnabled
     
-    if riftDetectionEnabled then
-        riftBtn.Text = "Rift Detection: ON"
-        riftBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+    if riftPingEnabled then
+        riftPingBtn.Text = "Rift Pings: ON"
+        riftPingBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
     else
-        riftBtn.Text = "Rift Detection: OFF"
-        riftBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+        riftPingBtn.Text = "Rift Pings: OFF"
+        riftPingBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
     end
     
     saveSettings()
@@ -3654,13 +4284,22 @@ print("✓ GUI created")
 -- Update button states to reflect loaded settings
 task.wait(0.1) -- Small delay to ensure all GUI elements are fully created
 spawn(function()
-    -- Update rift detection button
-    if riftDetectionEnabled then
-        riftBtn.Text = "Rift Detection: ON"
-        riftBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+    -- Update rift ping button (in Extra tab)
+    if riftPingEnabled then
+        riftPingBtn.Text = "Rift Pings: ON"
+        riftPingBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
     else
-        riftBtn.Text = "Rift Detection: OFF"
-        riftBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+        riftPingBtn.Text = "Rift Pings: OFF"
+        riftPingBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    end
+    
+    -- Update rift main toggle button (in Rifts tab)
+    riftMainToggleBtn.BackgroundColor3 = riftAutoTeleportEnabled and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    riftMainToggleBtn.Text = riftAutoTeleportEnabled and "Rift Detection: ON" or "Rift Detection: OFF"
+    
+    -- Update rift selection buttons (in Rifts tab)
+    for riftName, btn in pairs(riftButtons) do
+        btn.BackgroundColor3 = riftSelections[riftName] and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
     end
     
     -- Update player tracking button
@@ -3804,6 +4443,38 @@ spawn(function()
     adminSecretButtons.filter.BackgroundColor3 = adminAbuseSecretSettings.filterUnder1B and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
     
     print("✓ Button states updated from loaded settings")
+end)
+
+-- ============================================================
+-- RIFT DETECTION INITIALIZATION
+-- ============================================================
+
+spawn(function()
+    -- Wait for workspace to be ready
+    local success, riftsFolder = pcall(function()
+        return workspace:WaitForChild("Rendered", 10):WaitForChild("Rifts", 10)
+    end)
+    
+    if success and riftsFolder then
+        print("✓ Rift detection initialized")
+        
+        -- Listen for new rifts spawning
+        riftsFolder.ChildAdded:Connect(function(rift)
+            if not scriptActive then return end
+            task.wait(0.1) -- Small delay to ensure rift attributes are loaded
+            onRiftDetected(rift)
+        end)
+        
+        -- Check for existing rifts
+        for _, rift in pairs(riftsFolder:GetChildren()) do
+            task.spawn(function()
+                task.wait(0.1)
+                onRiftDetected(rift)
+            end)
+        end
+    else
+        warn("⚠ Could not find Rifts folder in workspace")
+    end
 end)
 
 print("Ready! Click 'Auto Hatch' to start hatching")
