@@ -121,48 +121,26 @@ for _, petName in ipairs(Config.SPECIAL_PETS) do
 end
 
 -- ============================================================================
--- SECTION 2: SERVICES
+-- SECTION 2: SERVICES (Direct access like original - mobile compatible)
 -- ============================================================================
 
--- Initialize Services safely (mobile-compatible)
-local Services = {}
+-- Direct service access (matches original working pattern)
+local P = game:GetService("Players")
+local RS = game:GetService("ReplicatedStorage")
+local UIS = game:GetService("UserInputService")
+local VIM = game:GetService("VirtualInputManager")
+local HttpService = game:GetService("HttpService")
+local TextChatService = game:GetService("TextChatService")
+local RunService = game:GetService("RunService")
+local p = P.LocalPlayer
 
-local function GetService(serviceName)
-    if not game or type(game.GetService) ~= "function" then
-        return nil
-    end
-    local success, service = pcall(function()
-        return game:GetService(serviceName)
-    end)
-    if success and service then
-        return service
-    end
-    -- Don't warn on mobile - some services might not be available
-    return nil
-end
-
--- Initialize services safely
-Services.Players = GetService("Players")
-Services.ReplicatedStorage = GetService("ReplicatedStorage")
-Services.UserInputService = GetService("UserInputService")
-Services.VirtualInputManager = GetService("VirtualInputManager")
-Services.HttpService = GetService("HttpService")
-Services.TextChatService = GetService("TextChatService")
-Services.RunService = GetService("RunService")
-
--- Get LocalPlayer safely (may not be available immediately on mobile)
+-- Helper function for safe LocalPlayer access (when needed)
 local function GetLocalPlayer()
-    if not Services.Players then
-        return nil
-    end
-    local success, player = pcall(function()
-        return Services.Players.LocalPlayer
-    end)
-    return success and player or nil
+    return p
 end
 
--- Try to get LocalPlayer, but it might be nil on mobile initially
-local LocalPlayer = GetLocalPlayer()
+-- Keep LocalPlayer variable for compatibility
+local LocalPlayer = p
 
 -- ============================================================================
 -- SECTION 3: UTILITY FUNCTIONS
@@ -212,16 +190,16 @@ end
 
 -- Safe JSON encode/decode
 function Utils.JSONEncode(data)
-    if Services.HttpService and Services.HttpService.JSONEncode then
-        return Services.HttpService:JSONEncode(data)
+    if HttpService and HttpService.JSONEncode then
+        return HttpService:JSONEncode(data)
     end
     return nil
 end
 
 function Utils.JSONDecode(json)
-    if Services.HttpService and Services.HttpService.JSONDecode then
+    if HttpService and HttpService.JSONDecode then
         local success, result = pcall(function()
-            return Services.HttpService:JSONDecode(json)
+            return HttpService:JSONDecode(json)
         end)
         return success and result or nil
     end
@@ -264,7 +242,7 @@ local ModuleLoader = {
 function ModuleLoader.Load()
     if ModuleLoader.loaded then return ModuleLoader.modules end
     
-    if not Services.ReplicatedStorage then
+    if not RS then
         warn("⚠ ReplicatedStorage not available")
         return {}
     end
@@ -274,7 +252,7 @@ function ModuleLoader.Load()
     
     for _, name in ipairs(moduleNames) do
         local success, module = pcall(function()
-            return Services.ReplicatedStorage:WaitForChild(name, 5)
+            return RS:WaitForChild(name, 5)
         end)
         
         if success and module then
@@ -944,12 +922,11 @@ end
 
 -- Teleport to position
 function RiftManager.TeleportToPosition(targetPosition, heightOffset, onArrival)
-    local player = GetLocalPlayer()
-    if not player then
+    if not p or not p.Character then
         if onArrival then onArrival() end
         return false
     end
-    local character = player.Character
+    local character = p.Character
     if not character then
         if onArrival then onArrival() end
         return false
@@ -996,8 +973,7 @@ function RiftManager.SendArrivalNotification(displayName, duration, multiplier)
     local webhookURL = SettingsManager.Get("webhookURL")
     if not webhookURL or webhookURL == "" then return end
     
-    local player = GetLocalPlayer()
-    local playerName = (player and player.Name) or "Unknown Player"
+    local playerName = (p and p.Name) or "Unknown Player"
     local description = string.format("**%s** teleported to **%s**\n**Duration:** %d seconds", playerName, displayName, math.floor(duration))
     
     if multiplier then
@@ -1148,9 +1124,8 @@ function RiftManager.OnRiftDetected(rift)
         multiplier = rift:GetAttribute("BonusLuck")
     end
     
-    local player = GetLocalPlayer()
-    if not player then return end
-    local character = player.Character
+    if not p or not p.Character then return end
+    local character = p.Character
     if not character or not character:FindFirstChild("HumanoidRootPart") then return end
     
     StateManager.storedPosition = character.HumanoidRootPart.Position
@@ -1232,7 +1207,7 @@ local AutoHatch = {
 function AutoHatch.Start()
     if AutoHatch.running then return end
     
-    if not Services.RunService or not Services.VirtualInputManager then
+    if not RunService or not VIM then
         warn("⚠ AutoHatch: Required services not available")
         return
     end
@@ -1240,16 +1215,16 @@ function AutoHatch.Start()
     AutoHatch.running = true
     StateManager.autoHatchEnabled = true
     
-    AutoHatch.connection = Services.RunService.Heartbeat:Connect(function()
+    AutoHatch.connection = RunService.Heartbeat:Connect(function()
         if not StateManager.scriptActive or not StateManager.autoHatchEnabled then
             AutoHatch.Stop()
             return
         end
         
-        if Services.VirtualInputManager then
-            Services.VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+        if VIM then
+            VIM:SendKeyEvent(true, Enum.KeyCode.E, false, game)
             task.wait(0.05)
-            Services.VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+            VIM:SendKeyEvent(false, Enum.KeyCode.E, false, game)
         end
     end)
     
@@ -1321,8 +1296,7 @@ function WebhookFormatter.FormatPetNotification(data)
     local shouldPing = data.shouldPing or false
     local isInfinity = data.isInfinity or false
     
-    local player = GetLocalPlayer()
-    local playerName = (player and player.Name) or "Unknown Player"
+    local playerName = (p and p.Name) or "Unknown Player"
     local eggsHatched = EggHelper.GetTotalHatched()
     
     -- Build full pet name
@@ -1597,7 +1571,7 @@ function EggMonitor.Start()
                         HTTPClient.Queue({
                             webhookURL = SettingsManager.Get("webhookURL"),
                             isPlainText = true,
-                            message = string.format("%s is no longer hatching.", (GetLocalPlayer() and GetLocalPlayer().Name) or "Player")
+                            message = string.format("%s is no longer hatching.", (p and p.Name) or "Player")
                         })
                         EggMonitor.hasStoppedHatching = true
                     end
@@ -1645,10 +1619,9 @@ function EggMonitor.Start()
                                 local timeUnit = timeInPeriod >= 60 and "hours" or "minutes"
                                 local timeValue = timeInPeriod >= 60 and (timeInPeriod / 60) or timeInPeriod
                                 
-                                local player = GetLocalPlayer()
                                 local message = string.format(
                                     "%s is still hatching.\nTotal Hatched: %s\nEggs hatched in the last %d %s: %s",
-                                    (player and player.Name) or "Player",
+                                    (p and p.Name) or "Player",
                                     formattedTotal,
                                     timeValue,
                                     timeUnit,
@@ -1688,7 +1661,7 @@ function EggMonitor.Start()
                         HTTPClient.Queue({
                             webhookURL = SettingsManager.Get("webhookURL"),
                             isPlainText = true,
-                            message = string.format("%s is no longer hatching.", (GetLocalPlayer() and GetLocalPlayer().Name) or "Player")
+                            message = string.format("%s is no longer hatching.", (p and p.Name) or "Player")
                         })
                         EggMonitor.hasStoppedHatching = true
                     end
@@ -1716,12 +1689,12 @@ local PlayerTracker = {
 function PlayerTracker.Init()
     if PlayerTracker.initialized then return end
     
-    if not Services.Players then
+    if not P then
         warn("⚠ PlayerTracker: Players service not available")
         return
     end
     
-    Services.Players.PlayerAdded:Connect(function(player)
+    P.PlayerAdded:Connect(function(player)
         if not StateManager.scriptActive or not SettingsManager.Get("playerTrackingEnabled") or SettingsManager.Get("webhookURL") == "" then return end
         
         HTTPClient.Queue({
@@ -1731,7 +1704,7 @@ function PlayerTracker.Init()
         })
     end)
     
-    Services.Players.PlayerRemoving:Connect(function(player)
+    P.PlayerRemoving:Connect(function(player)
         if not StateManager.scriptActive or not SettingsManager.Get("playerTrackingEnabled") or SettingsManager.Get("webhookURL") == "" then return end
         
         HTTPClient.Queue({
@@ -1758,8 +1731,8 @@ function ChatMonitor.Init()
     
     -- TextChatService (new)
     pcall(function()
-        if Services.TextChatService and Services.TextChatService.MessageReceived then
-            Services.TextChatService.MessageReceived:Connect(function(message)
+        if TextChatService and TextChatService.MessageReceived then
+            TextChatService.MessageReceived:Connect(function(message)
                 if not StateManager.scriptActive then return end
                 
                 local text = message.Text or ""
@@ -1777,17 +1750,9 @@ function ChatMonitor.Init()
     
     -- Legacy chat
     pcall(function()
-        if not Services.Players then return end
-        local player = GetLocalPlayer()
-        if not player then return end
-        
-        local success, playerGui = pcall(function()
-            return player:WaitForChild("PlayerGui", 5)
-        end)
-        if not success or not playerGui then return end
-        
-        local chat = playerGui:FindFirstChild("Chat")
-        if chat then
+        if not P or not p then return end
+        if p:WaitForChild("PlayerGui"):FindFirstChild("Chat") then
+            local chat = p.PlayerGui.Chat
             
             local function monitorChatElement(child)
                 if child:IsA("TextLabel") or child:IsA("TextBox") then
@@ -1820,7 +1785,7 @@ function ChatMonitor.Init()
 end
 
 -- ============================================================================
--- SECTION 16: GUI MANAGER (Simplified but Complete)
+-- SECTION 16: GUI MANAGER (GUI created directly in initialization section)
 -- ============================================================================
 
 local GUIManager = {
@@ -1828,174 +1793,137 @@ local GUIManager = {
     initialized = false
 }
 
--- Create GUI (simplified version - full GUI would be very long)
-function GUIManager.Init()
-    if GUIManager.initialized then return end
-    
-    -- Get LocalPlayer safely
-    local player = GetLocalPlayer()
-    if not player then
-        warn("⚠ GUIManager: LocalPlayer not available")
-        return
-    end
-    
-    -- Create ScreenGui
-    local g = Instance.new("ScreenGui")
-    g.Name = "BubblegumAutoHatch"
-    g.ResetOnSpawn = false
-    g.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    g.Parent = player.PlayerGui
-    
-    -- Main frame
-    local f = Instance.new("Frame")
-    f.Size = UDim2.new(0, Config.GUI.WIDTH, 0, Config.GUI.HEIGHT)
-    f.Position = UDim2.new(0.5, -Config.GUI.WIDTH/2, 0.5, -Config.GUI.HEIGHT/2)
-    f.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-    f.BorderSizePixel = 0
-    f.Parent = g
-    
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, Config.GUI.CORNER_RADIUS)
-    corner.Parent = f
-    
-    -- Auto-hatch button
-    local hatchBtn = Instance.new("TextButton")
-    hatchBtn.Size = UDim2.new(0, 200, 0, 40)
-    hatchBtn.Position = UDim2.new(0.5, -100, 0, 20)
-    hatchBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-    hatchBtn.Text = "Auto Hatch: OFF"
-    hatchBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    hatchBtn.TextSize = 16
-    hatchBtn.Font = Enum.Font.GothamBold
-    hatchBtn.BorderSizePixel = 0
-    hatchBtn.Parent = f
-    
-    hatchBtn.MouseButton1Click:Connect(function()
-        AutoHatch.Toggle()
-        hatchBtn.Text = StateManager.autoHatchEnabled and "Auto Hatch: ON" or "Auto Hatch: OFF"
-        hatchBtn.BackgroundColor3 = StateManager.autoHatchEnabled and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
-    end)
-    
-    -- Webhook URL input
-    local webhookLabel = Instance.new("TextLabel")
-    webhookLabel.Size = UDim2.new(0, 180, 0, 20)
-    webhookLabel.Position = UDim2.new(0.5, -90, 0, 70)
-    webhookLabel.BackgroundTransparency = 1
-    webhookLabel.Text = "Webhook URL:"
-    webhookLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-    webhookLabel.TextSize = 12
-    webhookLabel.Font = Enum.Font.Gotham
-    webhookLabel.TextXAlignment = Enum.TextXAlignment.Left
-    webhookLabel.Parent = f
-    
-    local webhookInput = Instance.new("TextBox")
-    webhookInput.Size = UDim2.new(0, 360, 0, 30)
-    webhookInput.Position = UDim2.new(0.5, -180, 0, 90)
-    webhookInput.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-    webhookInput.Text = SettingsManager.Get("webhookURL") or ""
-    webhookInput.TextColor3 = Color3.fromRGB(255, 255, 255)
-    webhookInput.TextSize = 12
-    webhookInput.Font = Enum.Font.Gotham
-    webhookInput.PlaceholderText = "Enter Discord webhook URL"
-    webhookInput.BorderSizePixel = 0
-    webhookInput.Parent = f
-    
-    webhookInput.FocusLost:Connect(function()
-        SettingsManager.Set("webhookURL", webhookInput.Text)
-        SettingsManager.Save()
-    end)
-    
-    -- Rift toggle
-    local riftToggle = Instance.new("TextButton")
-    riftToggle.Size = UDim2.new(0, 200, 0, 40)
-    riftToggle.Position = UDim2.new(0.5, -100, 0, 130)
-    riftToggle.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-    riftToggle.Text = "Rift Detection: OFF"
-    riftToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
-    riftToggle.TextSize = 14
-    riftToggle.Font = Enum.Font.GothamBold
-    riftToggle.BorderSizePixel = 0
-    riftToggle.Parent = f
-    
-    riftToggle.MouseButton1Click:Connect(function()
-        StateManager.riftAutoTeleportEnabled = not StateManager.riftAutoTeleportEnabled
-        riftToggle.Text = StateManager.riftAutoTeleportEnabled and "Rift Detection: ON" or "Rift Detection: OFF"
-        riftToggle.BackgroundColor3 = StateManager.riftAutoTeleportEnabled and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
-    end)
-    
-    -- Close button
-    local closeBtn = Instance.new("TextButton")
-    closeBtn.Size = UDim2.new(0, 100, 0, 30)
-    closeBtn.Position = UDim2.new(0.5, -50, 1, -40)
-    closeBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-    closeBtn.Text = "Close Script"
-    closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    closeBtn.TextSize = 14
-    closeBtn.Font = Enum.Font.GothamBold
-    closeBtn.BorderSizePixel = 0
-    closeBtn.Parent = f
-    
-    closeBtn.MouseButton1Click:Connect(function()
-        StateManager.scriptActive = false
-        AutoHatch.Stop()
-        PetDetector.Disconnect()
-        g:Destroy()
-    end)
-    
-    GUIManager.gui = g
-    GUIManager.initialized = true
-    print("✓ GUIManager initialized")
-end
-
 -- ============================================================================
 -- SECTION 17: MAIN ORCHESTRATOR
 -- ============================================================================
 
--- Initialize all systems
-local initSuccess, initError = pcall(function()
-    local spawnFunc = spawn or task.spawn
-    spawnFunc(function()
-        -- Wait for LocalPlayer to be available (especially important on mobile)
-        local maxWait = 10
-        local waited = 0
-        local player = GetLocalPlayer()
-        while not player and waited < maxWait do
-            task.wait(0.1)
-            waited = waited + 0.1
-            player = GetLocalPlayer()
-        end
-        
-        if not player then
-            warn("⚠ LocalPlayer not available after " .. maxWait .. " seconds")
-            return
-        end
-        
-        -- Update global reference
-        LocalPlayer = player
-        
-        task.wait(1) -- Wait for modules to load
-        
-        -- Initialize core systems first
-        SettingsManager.Init()
-        HTTPClient.Init()
-        ModuleLoader.Load()
-        
-        -- Then initialize feature modules
-        PetDetector.Init()
-        RiftManager.Init()
-        EggMonitor.Start()
-        PlayerTracker.Init()
-        ChatMonitor.Init()
-        GUIManager.Init()
-        
-        print("========================================")
-        print("✓ All systems initialized")
-        print("Ready! Click 'Auto Hatch' to start")
-        print("========================================")
-    end)
+-- ============================================================================
+-- INITIALIZATION (Matches original pattern - mobile compatible)
+-- ============================================================================
+
+-- Initialize core systems first (like original)
+SettingsManager.Init()
+HTTPClient.Init()
+ModuleLoader.Load()
+
+-- Wait for modules to load (like original)
+task.wait(1)
+
+-- Initialize feature modules (like original)
+PetDetector.Init()
+ChatMonitor.Init()
+PlayerTracker.Init()
+EggMonitor.Start()
+RiftManager.Init()
+
+-- Create GUI (like original - directly, not in a function initially)
+local g = Instance.new("ScreenGui")
+g.Name = "BubblegumAutoHatch"
+g.ResetOnSpawn = false
+g.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+g.Parent = p.PlayerGui
+
+-- Main frame
+local f = Instance.new("Frame")
+f.Size = UDim2.new(0, Config.GUI.WIDTH, 0, Config.GUI.HEIGHT)
+f.Position = UDim2.new(0.5, -Config.GUI.WIDTH/2, 0.5, -Config.GUI.HEIGHT/2)
+f.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+f.BorderSizePixel = 0
+f.Parent = g
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, Config.GUI.CORNER_RADIUS)
+corner.Parent = f
+
+-- Auto-hatch button
+local hatchBtn = Instance.new("TextButton")
+hatchBtn.Size = UDim2.new(0, 200, 0, 40)
+hatchBtn.Position = UDim2.new(0.5, -100, 0, 20)
+hatchBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+hatchBtn.Text = "Auto Hatch: OFF"
+hatchBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+hatchBtn.TextSize = 16
+hatchBtn.Font = Enum.Font.GothamBold
+hatchBtn.BorderSizePixel = 0
+hatchBtn.Parent = f
+
+hatchBtn.MouseButton1Click:Connect(function()
+    AutoHatch.Toggle()
+    hatchBtn.Text = StateManager.autoHatchEnabled and "Auto Hatch: ON" or "Auto Hatch: OFF"
+    hatchBtn.BackgroundColor3 = StateManager.autoHatchEnabled and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
 end)
 
-if not initSuccess then
-    warn("⚠ Failed to initialize script: " .. tostring(initError))
-end
+-- Webhook URL input
+local webhookLabel = Instance.new("TextLabel")
+webhookLabel.Size = UDim2.new(0, 180, 0, 20)
+webhookLabel.Position = UDim2.new(0.5, -90, 0, 70)
+webhookLabel.BackgroundTransparency = 1
+webhookLabel.Text = "Webhook URL:"
+webhookLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+webhookLabel.TextSize = 12
+webhookLabel.Font = Enum.Font.Gotham
+webhookLabel.TextXAlignment = Enum.TextXAlignment.Left
+webhookLabel.Parent = f
+
+local webhookInput = Instance.new("TextBox")
+webhookInput.Size = UDim2.new(0, 360, 0, 30)
+webhookInput.Position = UDim2.new(0.5, -180, 0, 90)
+webhookInput.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+webhookInput.Text = SettingsManager.Get("webhookURL") or ""
+webhookInput.TextColor3 = Color3.fromRGB(255, 255, 255)
+webhookInput.TextSize = 12
+webhookInput.Font = Enum.Font.Gotham
+webhookInput.PlaceholderText = "Enter Discord webhook URL"
+webhookInput.BorderSizePixel = 0
+webhookInput.Parent = f
+
+webhookInput.FocusLost:Connect(function()
+    SettingsManager.Set("webhookURL", webhookInput.Text)
+    SettingsManager.Save()
+end)
+
+-- Rift toggle
+local riftToggle = Instance.new("TextButton")
+riftToggle.Size = UDim2.new(0, 200, 0, 40)
+riftToggle.Position = UDim2.new(0.5, -100, 0, 130)
+riftToggle.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+riftToggle.Text = "Rift Detection: OFF"
+riftToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
+riftToggle.TextSize = 14
+riftToggle.Font = Enum.Font.GothamBold
+riftToggle.BorderSizePixel = 0
+riftToggle.Parent = f
+
+riftToggle.MouseButton1Click:Connect(function()
+    StateManager.riftAutoTeleportEnabled = not StateManager.riftAutoTeleportEnabled
+    riftToggle.Text = StateManager.riftAutoTeleportEnabled and "Rift Detection: ON" or "Rift Detection: OFF"
+    riftToggle.BackgroundColor3 = StateManager.riftAutoTeleportEnabled and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+end)
+
+-- Close button
+local closeBtn = Instance.new("TextButton")
+closeBtn.Size = UDim2.new(0, 100, 0, 30)
+closeBtn.Position = UDim2.new(0.5, -50, 1, -40)
+closeBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+closeBtn.Text = "Close Script"
+closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeBtn.TextSize = 14
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.BorderSizePixel = 0
+closeBtn.Parent = f
+
+closeBtn.MouseButton1Click:Connect(function()
+    StateManager.scriptActive = false
+    AutoHatch.Stop()
+    PetDetector.Disconnect()
+    g:Destroy()
+end)
+
+GUIManager.gui = g
+GUIManager.initialized = true
+
+print("========================================")
+print("✓ All systems initialized")
+print("Ready! Click 'Auto Hatch' to start")
+print("========================================")
 
