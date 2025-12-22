@@ -124,18 +124,37 @@ end
 -- SECTION 2: SERVICES
 -- ============================================================================
 
-local Services = {
-    Players = game:GetService("Players"),
-    ReplicatedStorage = game:GetService("ReplicatedStorage"),
-    UserInputService = game:GetService("UserInputService"),
-    VirtualInputManager = game:GetService("VirtualInputManager"),
-    HttpService = game:GetService("HttpService"),
-    TextChatService = game:GetService("TextChatService"),
-    RunService = game:GetService("RunService")
-}
+-- Initialize Services safely (mobile-compatible)
+local Services = {}
+
+local function GetService(serviceName)
+    if not game or type(game.GetService) ~= "function" then
+        return nil
+    end
+    local success, service = pcall(function()
+        return game:GetService(serviceName)
+    end)
+    if success and service then
+        return service
+    end
+    -- Don't warn on mobile - some services might not be available
+    return nil
+end
+
+-- Initialize services safely
+Services.Players = GetService("Players")
+Services.ReplicatedStorage = GetService("ReplicatedStorage")
+Services.UserInputService = GetService("UserInputService")
+Services.VirtualInputManager = GetService("VirtualInputManager")
+Services.HttpService = GetService("HttpService")
+Services.TextChatService = GetService("TextChatService")
+Services.RunService = GetService("RunService")
 
 -- Get LocalPlayer safely (may not be available immediately on mobile)
 local function GetLocalPlayer()
+    if not Services.Players then
+        return nil
+    end
     local success, player = pcall(function()
         return Services.Players.LocalPlayer
     end)
@@ -244,6 +263,11 @@ local ModuleLoader = {
 
 function ModuleLoader.Load()
     if ModuleLoader.loaded then return ModuleLoader.modules end
+    
+    if not Services.ReplicatedStorage then
+        warn("⚠ ReplicatedStorage not available")
+        return {}
+    end
     
     local modules = {}
     local moduleNames = {"Remote", "ItemUtil", "PetsData", "PetUtil", "FormatCommas", "LocalData"}
@@ -1208,6 +1232,11 @@ local AutoHatch = {
 function AutoHatch.Start()
     if AutoHatch.running then return end
     
+    if not Services.RunService or not Services.VirtualInputManager then
+        warn("⚠ AutoHatch: Required services not available")
+        return
+    end
+    
     AutoHatch.running = true
     StateManager.autoHatchEnabled = true
     
@@ -1217,9 +1246,11 @@ function AutoHatch.Start()
             return
         end
         
-        Services.VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.E, false, game)
-        task.wait(0.05)
-        Services.VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+        if Services.VirtualInputManager then
+            Services.VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+            task.wait(0.05)
+            Services.VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+        end
     end)
     
     print("✓ Auto-hatch started")
@@ -1685,6 +1716,11 @@ local PlayerTracker = {
 function PlayerTracker.Init()
     if PlayerTracker.initialized then return end
     
+    if not Services.Players then
+        warn("⚠ PlayerTracker: Players service not available")
+        return
+    end
+    
     Services.Players.PlayerAdded:Connect(function(player)
         if not StateManager.scriptActive or not SettingsManager.Get("playerTrackingEnabled") or SettingsManager.Get("webhookURL") == "" then return end
         
@@ -1741,9 +1777,17 @@ function ChatMonitor.Init()
     
     -- Legacy chat
     pcall(function()
-        local player = Services.Players.LocalPlayer
-        if player and player:WaitForChild("PlayerGui"):FindFirstChild("Chat") then
-            local chat = player.PlayerGui.Chat
+        if not Services.Players then return end
+        local player = GetLocalPlayer()
+        if not player then return end
+        
+        local success, playerGui = pcall(function()
+            return player:WaitForChild("PlayerGui", 5)
+        end)
+        if not success or not playerGui then return end
+        
+        local chat = playerGui:FindFirstChild("Chat")
+        if chat then
             
             local function monitorChatElement(child)
                 if child:IsA("TextLabel") or child:IsA("TextBox") then
@@ -1928,22 +1972,22 @@ local initSuccess, initError = pcall(function()
         
         -- Update global reference
         LocalPlayer = player
-    
-    task.wait(1) -- Wait for modules to load
-    
-    -- Initialize core systems first
-    SettingsManager.Init()
-    HTTPClient.Init()
-    ModuleLoader.Load()
-    
-    -- Then initialize feature modules
-    PetDetector.Init()
-    RiftManager.Init()
-    EggMonitor.Start()
-    PlayerTracker.Init()
-    ChatMonitor.Init()
-    GUIManager.Init()
-    
+        
+        task.wait(1) -- Wait for modules to load
+        
+        -- Initialize core systems first
+        SettingsManager.Init()
+        HTTPClient.Init()
+        ModuleLoader.Load()
+        
+        -- Then initialize feature modules
+        PetDetector.Init()
+        RiftManager.Init()
+        EggMonitor.Start()
+        PlayerTracker.Init()
+        ChatMonitor.Init()
+        GUIManager.Init()
+        
         print("========================================")
         print("✓ All systems initialized")
         print("Ready! Click 'Auto Hatch' to start")
