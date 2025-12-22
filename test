@@ -805,7 +805,10 @@ end
 
 -- Send rift arrival notification
 local function sendRiftArrivalNotification(displayName, duration, multiplier)
-    if webhookURL == "" or not httpLib then return end
+    if not webhookURL or webhookURL == "" or not httpLib then 
+        print("⚠ Rift notification skipped: webhookURL empty or httpLib unavailable")
+        return 
+    end
     
     local playerName = p.Name or "Unknown Player"
     local durationText = string.format("%.0f", duration) .. "s"
@@ -1034,25 +1037,84 @@ local function onRiftDetected(rift)
     -- Send arrival notification
     sendRiftArrivalNotification(displayName, duration, multiplier)
     
-    -- Schedule return
-    task.delay(duration, function()
-        if currentRift == rift and isAtRift then
-            -- Return to previous position
+    -- Store rift reference for return callback
+    local riftRef = rift
+    local riftNameForReturn = displayName
+    
+    -- Monitor rift duration and handle return (using spawn + task.wait for reliability)
+    spawn(function()
+        print("⏱ Rift timer started: " .. math.floor(duration) .. " seconds for " .. displayName)
+        
+        -- Wait for the duration
+        local startWait = tick()
+        task.wait(duration)
+        local actualWait = tick() - startWait
+        
+        print("⏰ Rift duration expired (waited " .. math.floor(actualWait) .. "s) for " .. displayName)
+        
+        -- Check if we're still at this rift (user might have manually left or another rift triggered)
+        if isAtRift and currentRift == riftRef then
+            print("🔄 Returning to previous position from " .. displayName)
+            
+            -- Set returning flag to prevent new rift detection
             returningFromRift = true
+            
+            -- Return to previous position
             if storedPosition then
-                teleportToPosition(storedPosition, 0)
+                local success = teleportToPosition(storedPosition, 0)
+                if success then
+                    print("✅ Successfully returned to previous position")
+                else
+                    print("⚠ Failed to teleport back (character may be missing)")
+                end
+            else
+                print("⚠ No stored position to return to")
             end
             
             -- Send summary notification
-            sendRiftSummary(displayName)
+            sendRiftSummary(riftNameForReturn)
             
-            -- Reset state
-            task.wait(1)
+            -- Reset state after a brief delay
+            task.wait(0.5)
             isAtRift = false
             currentRift = nil
             riftStartTime = nil
             storedPosition = nil
             returningFromRift = false
+            print("✅ Rift state reset complete")
+        else
+            print("⚠ Return cancelled: isAtRift=" .. tostring(isAtRift) .. ", currentRift match=" .. tostring(currentRift == riftRef))
+        end
+    end)
+    
+    -- Also monitor rift despawn (fallback in case duration calculation is wrong)
+    local riftConnection = nil
+    riftConnection = rift.AncestryChanged:Connect(function()
+        if not rift.Parent and isAtRift and currentRift == riftRef then
+            print("🔔 Rift despawned early, initiating return...")
+            riftConnection:Disconnect()
+            
+            -- Set returning flag
+            returningFromRift = true
+            
+            -- Return immediately
+            if storedPosition then
+                teleportToPosition(storedPosition, 0)
+            end
+            
+            -- Send summary
+            sendRiftSummary(riftNameForReturn)
+            
+            -- Reset state
+            task.wait(0.5)
+            isAtRift = false
+            currentRift = nil
+            riftStartTime = nil
+            storedPosition = nil
+            returningFromRift = false
+        elseif not rift.Parent then
+            -- Rift despawned but we're not at it anymore, just disconnect
+            riftConnection:Disconnect()
         end
     end)
 end
@@ -2758,13 +2820,18 @@ g.ResetOnSpawn = false
 g.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 g.Parent = p.PlayerGui
 
--- Main frame (slightly wider for tab system)
+-- Main frame (slightly wider for tab system, taller for more content)
 local f = Instance.new("Frame")
-f.Size = UDim2.new(0, 450, 0, 240)
-f.Position = UDim2.new(0.5, -225, 0.5, -120)
+f.Size = UDim2.new(0, 450, 0, 360)
+f.Position = UDim2.new(0.5, -225, 0.5, -180)
 f.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 f.BorderSizePixel = 0
 f.Parent = g
+
+-- Add rounded corners to main frame
+local fCorner = Instance.new("UICorner")
+fCorner.CornerRadius = UDim.new(0, 8)
+fCorner.Parent = f
 
 -- Tab container (left side)
 local tabContainer = Instance.new("Frame")
@@ -2885,6 +2952,8 @@ secretSettingsMenu.Visible = false
 secretSettingsMenu.ZIndex = 5
 secretSettingsMenu.Parent = contentContainer
 
+-- Add rounded corners to secret settings menu background (will be added in createSecretSettingsMenu)
+
 -- Admin Abuse Secret Settings sub-menu frame (overlay)
 local adminSecretSettingsMenu = Instance.new("Frame")
 adminSecretSettingsMenu.Size = UDim2.new(1, 0, 1, 0)
@@ -2907,9 +2976,9 @@ detectionTitle.Font = Enum.Font.GothamBold
 detectionTitle.BorderSizePixel = 0
 detectionTitle.Parent = detectionContent
 
--- Row 1: Secret Detection Settings button (full width)
+-- Row 1: Secret Detection Settings button (full width) - smaller
 local secretSettingsBtn = Instance.new("TextButton")
-secretSettingsBtn.Size = UDim2.new(0, 330, 0, 45)
+secretSettingsBtn.Size = UDim2.new(0, 330, 0, 38)
 secretSettingsBtn.Position = UDim2.new(0, 15, 0, 50)
 secretSettingsBtn.BackgroundColor3 = Color3.fromRGB(100, 150, 255)
 secretSettingsBtn.Text = "⚙ Secret Detection Settings"
@@ -3048,37 +3117,37 @@ riftsTitle.Font = Enum.Font.GothamBold
 riftsTitle.BorderSizePixel = 0
 riftsTitle.Parent = riftsContent
 
--- Main rift detection toggle button (full width)
+-- Main rift detection toggle button (full width) - smaller
 local riftMainToggleBtn = Instance.new("TextButton")
-riftMainToggleBtn.Size = UDim2.new(0, 330, 0, 50)
+riftMainToggleBtn.Size = UDim2.new(0, 330, 0, 40)
 riftMainToggleBtn.Position = UDim2.new(0, 15, 0, 50)
 riftMainToggleBtn.BackgroundColor3 = riftAutoTeleportEnabled and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
 riftMainToggleBtn.Text = riftAutoTeleportEnabled and "Rift Detection: ON" or "Rift Detection: OFF"
 riftMainToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-riftMainToggleBtn.TextSize = 16
+riftMainToggleBtn.TextSize = 14
 riftMainToggleBtn.Font = Enum.Font.GothamBold
 riftMainToggleBtn.BorderSizePixel = 0
 riftMainToggleBtn.Parent = riftsContent
 
 -- Rift selection label
 local riftSelectionLabel = Instance.new("TextLabel")
-riftSelectionLabel.Size = UDim2.new(1, -30, 0, 25)
+riftSelectionLabel.Size = UDim2.new(1, -30, 0, 20)
 riftSelectionLabel.Position = UDim2.new(0, 15, 0, 110)
 riftSelectionLabel.BackgroundTransparency = 1
 riftSelectionLabel.Text = "Select Rifts to Hunt:"
 riftSelectionLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-riftSelectionLabel.TextSize = 14
+riftSelectionLabel.TextSize = 12
 riftSelectionLabel.Font = Enum.Font.GothamBold
 riftSelectionLabel.TextXAlignment = Enum.TextXAlignment.Left
 riftSelectionLabel.Parent = riftsContent
 
--- Rift checkboxes (2 columns x 4 rows)
+-- Rift checkboxes (2 columns x 4 rows) - smaller buttons
 local riftButtons = {}
-local buttonWidth = 160
-local buttonHeight = 35
+local buttonWidth = 155
+local buttonHeight = 28
 local spacing = 5
 local startX = 15
-local startY = 140
+local startY = 135
 
 for i, riftInfo in ipairs(AVAILABLE_RIFTS) do
     local row = math.floor((i - 1) / 2)
@@ -3090,7 +3159,7 @@ for i, riftInfo in ipairs(AVAILABLE_RIFTS) do
     btn.BackgroundColor3 = riftSelections[riftInfo.name] and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
     btn.Text = riftInfo.displayName
     btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    btn.TextSize = 11
+    btn.TextSize = 10
     btn.Font = Enum.Font.GothamBold
     btn.BorderSizePixel = 0
     btn.Parent = riftsContent
@@ -3133,8 +3202,8 @@ adminAbuseTitle.Parent = adminAbuseContent
 
 -- Admin Abuse toggle button
 local adminAbuseToggleBtn = Instance.new("TextButton")
-adminAbuseToggleBtn.Size = UDim2.new(0, 330, 0, 50)
-adminAbuseToggleBtn.Position = UDim2.new(0, 15, 0, 55)
+adminAbuseToggleBtn.Size = UDim2.new(0, 330, 0, 40)
+adminAbuseToggleBtn.Position = UDim2.new(0, 15, 0, 50)
 adminAbuseToggleBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
 adminAbuseToggleBtn.Text = "Admin Abuse Mode: OFF"
 adminAbuseToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -3144,8 +3213,8 @@ adminAbuseToggleBtn.BorderSizePixel = 0
 adminAbuseToggleBtn.Parent = adminAbuseContent
 
 local adminAbuseToggleDesc = Instance.new("TextLabel")
-adminAbuseToggleDesc.Size = UDim2.new(0, 330, 0, 30)
-adminAbuseToggleDesc.Position = UDim2.new(0, 15, 0, 110)
+adminAbuseToggleDesc.Size = UDim2.new(0, 330, 0, 25)
+adminAbuseToggleDesc.Position = UDim2.new(0, 15, 0, 95)
 adminAbuseToggleDesc.BackgroundTransparency = 1
 adminAbuseToggleDesc.Text = "Use separate detection settings for admin abuse events.\nTracks all secrets/infinities for summary report."
 adminAbuseToggleDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
@@ -3158,8 +3227,8 @@ adminAbuseToggleDesc.Parent = adminAbuseContent
 
 -- Admin Abuse settings button
 local adminAbuseSettingsBtn = Instance.new("TextButton")
-adminAbuseSettingsBtn.Size = UDim2.new(0, 330, 0, 45)
-adminAbuseSettingsBtn.Position = UDim2.new(0, 15, 0, 150)
+adminAbuseSettingsBtn.Size = UDim2.new(0, 330, 0, 38)
+adminAbuseSettingsBtn.Position = UDim2.new(0, 15, 0, 125)
 adminAbuseSettingsBtn.BackgroundColor3 = Color3.fromRGB(100, 150, 255)
 adminAbuseSettingsBtn.Text = "⚙ Configure Admin Abuse Settings"
 adminAbuseSettingsBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -3284,6 +3353,11 @@ toggleBtn.TextSize = 12
 toggleBtn.Font = Enum.Font.GothamBold
 toggleBtn.BorderSizePixel = 0
 toggleBtn.Parent = g
+
+-- Add rounded corners to toggle button
+local toggleCorner = Instance.new("UICorner")
+toggleCorner.CornerRadius = UDim.new(0, 8)
+toggleCorner.Parent = toggleBtn
 
 -- Extra content title bar
 local extraTitle = Instance.new("TextLabel")
@@ -3497,6 +3571,11 @@ local function createSecretSettingsMenu(parentFrame, isAdminAbuse)
     bg.ZIndex = 6
     bg.Parent = parentFrame
     
+    -- Add rounded corners to background
+    local bgCorner = Instance.new("UICorner")
+    bgCorner.CornerRadius = UDim.new(0, 8)
+    bgCorner.Parent = bg
+    
     -- Title
     local menuTitle = Instance.new("TextLabel")
     menuTitle.Size = UDim2.new(1, 0, 0, 40)
@@ -3551,38 +3630,39 @@ local function createSecretSettingsMenu(parentFrame, isAdminAbuse)
     local buttons = {}
     
     -- Create rows for: Normal, Shiny, Mythic, Shiny Mythic, XL, Infinities, <1B Filter
+    -- Reduced spacing and button sizes to fit better
     local rows = {
-        {name = "Normal", key = "Normal", yPos = 70},
-        {name = "Shiny", key = "Shiny", yPos = 95},
-        {name = "Mythic", key = "Mythic", yPos = 120},
-        {name = "Shiny Mythic", key = "ShinyMythic", yPos = 145},
-        {name = "XL", key = "XL", yPos = 170},
-        {name = "Infinities", key = "Infinity", yPos = 195, special = true}
+        {name = "Normal", key = "Normal", yPos = 65},
+        {name = "Shiny", key = "Shiny", yPos = 85},
+        {name = "Mythic", key = "Mythic", yPos = 105},
+        {name = "Shiny Mythic", key = "ShinyMythic", yPos = 125},
+        {name = "XL", key = "XL", yPos = 145},
+        {name = "Infinities", key = "Infinity", yPos = 165, special = true}
     }
     
     for _, row in ipairs(rows) do
-        -- Notify button (left)
+        -- Notify button (left) - smaller size
         local notifyBtn = Instance.new("TextButton")
-        notifyBtn.Size = UDim2.new(0, 150, 0, 22)
+        notifyBtn.Size = UDim2.new(0, 140, 0, 18)
         notifyBtn.Position = UDim2.new(0, 15, 0, row.yPos)
         notifyBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
         notifyBtn.Text = row.name .. ": OFF"
         notifyBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        notifyBtn.TextSize = 9
+        notifyBtn.TextSize = 8
         notifyBtn.Font = Enum.Font.GothamBold
         notifyBtn.BorderSizePixel = 0
         notifyBtn.ZIndex = 7
         notifyBtn.Parent = bg
         buttons["notify" .. row.key] = notifyBtn
         
-        -- Ping button (right)
+        -- Ping button (right) - smaller size
         local pingBtn = Instance.new("TextButton")
-        pingBtn.Size = UDim2.new(0, 150, 0, 22)
-        pingBtn.Position = UDim2.new(0, 185, 0, row.yPos)
+        pingBtn.Size = UDim2.new(0, 140, 0, 18)
+        pingBtn.Position = UDim2.new(0, 175, 0, row.yPos)
         pingBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
         pingBtn.Text = "Ping: OFF"
         pingBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        pingBtn.TextSize = 9
+        pingBtn.TextSize = 8
         pingBtn.Font = Enum.Font.GothamBold
         pingBtn.BorderSizePixel = 0
         pingBtn.ZIndex = 7
@@ -3590,10 +3670,10 @@ local function createSecretSettingsMenu(parentFrame, isAdminAbuse)
         buttons["ping" .. row.key] = pingBtn
     end
     
-    -- <1B Filter button (full width)
+    -- <1B Filter button (full width) - moved up
     local filterBtn = Instance.new("TextButton")
-    filterBtn.Size = UDim2.new(0, 320, 0, 22)
-    filterBtn.Position = UDim2.new(0, 15, 0, 220)
+    filterBtn.Size = UDim2.new(0, 320, 0, 20)
+    filterBtn.Position = UDim2.new(0, 15, 0, 190)
     filterBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
     filterBtn.Text = "Filter <1B Secrets: OFF"
     filterBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
