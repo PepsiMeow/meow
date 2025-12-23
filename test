@@ -472,9 +472,6 @@ end
 
 -- Build full pet name with variants
 local function buildFullPetName(petName, shiny, mythic, xl)
-    -- Guard against nil petName to avoid concatenation errors
-    petName = petName or "Unknown Pet"
-
     local prefix = ""
     if shiny and mythic then
         prefix = "Shiny Mythic "
