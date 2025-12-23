@@ -830,32 +830,6 @@ local function addRiftStatusLog(message)
     print("[RIFT] " .. message)
 end
 
--- Send rift webhook notification
-local function sendRiftWebhook(message, shouldPing)
-    if not webhookURL or webhookURL == "" then
-        return
-    end
-    
-    -- shouldPing parameter determines if we should ping (only when teleporting TO rift, not when returning)
-    -- But only ping if riftPingEnabled toggle is ON
-    local mention = (shouldPing and riftPingEnabled and discordUserID ~= "") and ("<@" .. discordUserID .. ">") or ""
-    
-    table.insert(webhookQueue, {
-        isCustomEmbed = true,
-        payload = {
-            content = mention ~= "" and mention or nil,
-            embeds = {{
-                title = "🎯 Rift Teleportation",
-                description = message,
-                color = 5763719, -- Green color
-                timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
-            }}
-        }
-    })
-    
-    processWebhookQueue()
-end
-
 -- Return to stored position
 local function returnToStoredPosition()
     if not storedPosition or returningFromRift then return end
@@ -1224,6 +1198,32 @@ local function processWebhookQueue()
         
         isSendingWebhook = false
     end)
+end
+
+-- Send rift webhook notification (must be after processWebhookQueue is defined)
+local function sendRiftWebhook(message, shouldPing)
+    if not webhookURL or webhookURL == "" then
+        return
+    end
+    
+    -- shouldPing parameter determines if we should ping (only when teleporting TO rift, not when returning)
+    -- But only ping if riftPingEnabled toggle is ON
+    local mention = (shouldPing and riftPingEnabled and discordUserID ~= "") and ("<@" .. discordUserID .. ">") or ""
+    
+    table.insert(webhookQueue, {
+        isCustomEmbed = true,
+        payload = {
+            content = mention ~= "" and mention or nil,
+            embeds = {{
+                title = "🎯 Rift Teleportation",
+                description = message,
+                color = 5763719, -- Green color
+                timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+            }}
+        }
+    })
+    
+    processWebhookQueue()
 end
 
 -- Public function to queue webhook (handles rate limiting)
