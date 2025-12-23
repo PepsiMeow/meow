@@ -833,6 +833,146 @@ local function addRiftStatusLog(message)
     print("[RIFT] " .. message)
 end
 
+-- Process webhook queue (moved before sendRiftWebhook to ensure it's defined)
+local function processWebhookQueue()
+    if isSendingWebhook or #webhookQueue == 0 or not scriptActive then
+        return
+    end
+    
+    isSendingWebhook = true
+    
+    spawn(function()
+        while #webhookQueue > 0 and scriptActive do
+            local webhookData = table.remove(webhookQueue, 1)
+            
+            -- Check message type
+            if webhookData.isCustomEmbed then
+                -- Custom embed (like admin abuse summary)
+                local maxRetries = 5
+                local retryCount = 0
+                local success = false
+                
+                while retryCount < maxRetries and not success do
+                    local jsonPayload = jsonEncode(webhookData.payload)
+                    local ok, response, status = httpLib(webhookURL, "POST", {
+                        ["Content-Type"] = "application/json"
+                    }, jsonPayload)
+                    
+                    success = ok and (status == 200 or status == 204)
+                    
+                    if not success and status == 429 then
+                        retryCount = retryCount + 1
+                        if retryCount < maxRetries then
+                            task.wait(1)
+                        end
+                    else
+                        break
+                    end
+                end
+                
+                if not success then
+                    table.insert(webhookQueue, 1, webhookData)
+                    messagesRemainingWithDelay = 5
+                end
+            elseif webhookData.isPlainText then
+                -- Plain text message
+                local maxRetries = 5
+                local retryCount = 0
+                local success = false
+                
+                while retryCount < maxRetries and not success do
+                    success = sendPlainTextWebhook(webhookData.message, webhookData.shouldPing or false)
+                    
+                    if not success then
+                        retryCount = retryCount + 1
+                        if retryCount < maxRetries then
+                            task.wait(1)
+                        end
+                    end
+                end
+                
+                if not success then
+                    table.insert(webhookQueue, 1, webhookData)
+                    messagesRemainingWithDelay = 5
+                end
+            elseif webhookData.isDebug and webhookData.debugMessage then
+                -- Debug webhook
+                local maxRetries = 5
+                local retryCount = 0
+                local success = false
+                
+                while retryCount < maxRetries and not success do
+                    success = sendDebugWebhook(webhookData.debugMessage)
+                    
+                    if not success then
+                        retryCount = retryCount + 1
+                        if retryCount < maxRetries then
+                            task.wait(1)
+                        end
+                    end
+                end
+                
+                if not success then
+                    table.insert(webhookQueue, 1, webhookData)
+                    messagesRemainingWithDelay = 5
+                end
+            else
+                -- Regular or special notification
+                local petName = webhookData.petName
+                local shiny = webhookData.shiny
+                local mythic = webhookData.mythic
+                local xl = webhookData.xl
+                local eggName = webhookData.eggName
+                local rarity = webhookData.rarity
+                local pet = webhookData.pet
+                -- OPTIMIZED: Fetch thumbnail URL lazily here (or use cached/pre-fetched URL)
+                local petImageUrl = webhookData.petImageUrl
+                if not petImageUrl and webhookData.petImageAssetId then
+                    petImageUrl = getThumbnailUrl(webhookData.petImageAssetId)
+                end
+                local isSpecial = webhookData.isSpecial == true
+                local isInfinity = webhookData.isInfinity == true
+                local notificationType = webhookData.notificationType
+                local shouldPing = webhookData.shouldPing or false
+                
+                local maxRetries = 5
+                local retryCount = 0
+                local success = false
+                
+                while retryCount < maxRetries and not success do
+                    local notifType = isSpecial and "infinity" or (notificationType or "secret")
+                    success = sendPetNotificationWebhook(petName, shiny, mythic, xl, eggName, rarity, pet, petImageUrl, notifType, shouldPing)
+                    
+                    if not success then
+                        retryCount = retryCount + 1
+                        if retryCount < maxRetries then
+                            task.wait(1)
+                        end
+                    end
+                end
+                
+                if not success then
+                    table.insert(webhookQueue, 1, webhookData)
+                    messagesRemainingWithDelay = 5
+                end
+            end
+            
+            -- Determine delay based on rate limit counter
+            local delay = (messagesRemainingWithDelay > 0) and 2 or 1
+            if messagesRemainingWithDelay > 0 then
+                messagesRemainingWithDelay = messagesRemainingWithDelay - 1
+            end
+            
+            -- Wait before sending next message in queue
+            if #webhookQueue > 0 then
+                task.wait(delay)
+            end
+        end
+        
+        isSendingWebhook = false
+    end)
+end
+
 -- Send rift webhook notification
 local function sendRiftWebhook(message, shouldPing)
     if not webhookURL or webhookURL == "" then
@@ -1083,146 +1223,6 @@ local function setupRiftMonitoring()
                 end
             end)
         end
-    end)
-end
-
--- Process webhook queue
-local function processWebhookQueue()
-    if isSendingWebhook or #webhookQueue == 0 or not scriptActive then
-        return
-    end
-    
-    isSendingWebhook = true
-    
-    spawn(function()
-        while #webhookQueue > 0 and scriptActive do
-            local webhookData = table.remove(webhookQueue, 1)
-            
-            -- Check message type
-            if webhookData.isCustomEmbed then
-                -- Custom embed (like admin abuse summary)
-                local maxRetries = 5
-                local retryCount = 0
-                local success = false
-                
-                while retryCount < maxRetries and not success do
-                    local jsonPayload = jsonEncode(webhookData.payload)
-                    local ok, response, status = httpLib(webhookURL, "POST", {
-                        ["Content-Type"] = "application/json"
-                    }, jsonPayload)
-                    
-                    success = ok and (status == 200 or status == 204)
-                    
-                    if not success and status == 429 then
-                        retryCount = retryCount + 1
-                        if retryCount < maxRetries then
-                            task.wait(1)
-                        end
-                    else
-                        break
-                    end
-                end
-                
-                if not success then
-                    table.insert(webhookQueue, 1, webhookData)
-                    messagesRemainingWithDelay = 5
-                end
-            elseif webhookData.isPlainText then
-                -- Plain text message
-                local maxRetries = 5
-                local retryCount = 0
-                local success = false
-                
-                while retryCount < maxRetries and not success do
-                    success = sendPlainTextWebhook(webhookData.message, webhookData.shouldPing or false)
-                    
-                    if not success then
-                        retryCount = retryCount + 1
-                        if retryCount < maxRetries then
-                            task.wait(1)
-                        end
-                    end
-                end
-                
-                if not success then
-                    table.insert(webhookQueue, 1, webhookData)
-                    messagesRemainingWithDelay = 5
-                end
-            elseif webhookData.isDebug and webhookData.debugMessage then
-                -- Debug webhook
-                local maxRetries = 5
-                local retryCount = 0
-                local success = false
-                
-                while retryCount < maxRetries and not success do
-                    success = sendDebugWebhook(webhookData.debugMessage)
-                    
-                    if not success then
-                        retryCount = retryCount + 1
-                        if retryCount < maxRetries then
-                            task.wait(1)
-                        end
-                    end
-                end
-                
-                if not success then
-                    table.insert(webhookQueue, 1, webhookData)
-                    messagesRemainingWithDelay = 5
-                end
-            else
-                -- Regular or special notification
-                local petName = webhookData.petName
-                local shiny = webhookData.shiny
-                local mythic = webhookData.mythic
-                local xl = webhookData.xl
-                local eggName = webhookData.eggName
-                local rarity = webhookData.rarity
-                local pet = webhookData.pet
-                -- OPTIMIZED: Fetch thumbnail URL lazily here (or use cached/pre-fetched URL)
-                local petImageUrl = webhookData.petImageUrl
-                if not petImageUrl and webhookData.petImageAssetId then
-                    petImageUrl = getThumbnailUrl(webhookData.petImageAssetId)
-                end
-                local isSpecial = webhookData.isSpecial == true
-                local isInfinity = webhookData.isInfinity == true
-                local notificationType = webhookData.notificationType
-                local shouldPing = webhookData.shouldPing or false
-                
-                local maxRetries = 5
-                local retryCount = 0
-                local success = false
-                
-                while retryCount < maxRetries and not success do
-                    local notifType = isSpecial and "infinity" or (notificationType or "secret")
-                    success = sendPetNotificationWebhook(petName, shiny, mythic, xl, eggName, rarity, pet, petImageUrl, notifType, shouldPing)
-                    
-                    if not success then
-                        retryCount = retryCount + 1
-                        if retryCount < maxRetries then
-                            task.wait(1)
-                        end
-                    end
-                end
-                
-                if not success then
-                    table.insert(webhookQueue, 1, webhookData)
-                    messagesRemainingWithDelay = 5
-                end
-            end
-            
-            -- Determine delay based on rate limit counter
-            local delay = (messagesRemainingWithDelay > 0) and 2 or 1
-            if messagesRemainingWithDelay > 0 then
-                messagesRemainingWithDelay = messagesRemainingWithDelay - 1
-            end
-            
-            -- Wait before sending next message in queue
-            if #webhookQueue > 0 then
-                task.wait(delay)
-            end
-        end
-        
-        isSendingWebhook = false
     end)
 end
 
