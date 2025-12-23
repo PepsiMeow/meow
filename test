@@ -830,6 +830,9 @@ local function addRiftStatusLog(message)
     print("[RIFT] " .. message)
 end
 
+-- Forward declare sendRiftWebhook (defined later after processWebhookQueue)
+local sendRiftWebhook
+
 -- Return to stored position
 local function returnToStoredPosition()
     if not storedPosition or returningFromRift then return end
@@ -1201,7 +1204,7 @@ local function processWebhookQueue()
 end
 
 -- Send rift webhook notification (must be after processWebhookQueue is defined)
-local function sendRiftWebhook(message, shouldPing)
+sendRiftWebhook = function(message, shouldPing)
     if not webhookURL or webhookURL == "" then
         return
     end
