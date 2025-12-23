@@ -856,12 +856,19 @@ local function returnToStoredPosition()
     
     -- Always reset state regardless of teleport success/failure
     -- This ensures player can teleport to new rifts even if return teleport fails
+    local previousRift = currentRift
     isAtRift = false
     currentRift = nil
     riftStartTime = nil
     storedPosition = nil
     riftDuration = 0
     luckMultiplier = nil
+    
+    -- Clear the previous rift from knownRifts so we can process it again if it respawns
+    -- (Rifts are unique objects, so we're just cleaning up the reference)
+    if previousRift then
+        knownRifts[previousRift] = nil
+    end
     
     returningFromRift = false -- Clear flag
 end
@@ -984,6 +991,9 @@ local function handleRiftSpawn(rift)
     addRiftStatusLog("🎯 Rift detected: " .. displayNameWithMultiplier)
     addRiftStatusLog("   Duration: " .. math.floor(displayedDuration / 60) .. "m " .. math.floor(displayedDuration % 60) .. "s")
     
+    -- Mark this rift as known so we don't process it again
+    knownRifts[rift] = true
+    
     -- Set state
     currentRift = rift
     isAtRift = true
@@ -1077,13 +1087,16 @@ end
 
 -- Process webhook queue
 local function processWebhookQueue()
+    -- If already processing or no items or script inactive, return
     if isSendingWebhook or #webhookQueue == 0 or not scriptActive then
         return
     end
     
+    -- Start processing
     isSendingWebhook = true
     
     spawn(function()
+        -- Process all items in queue
         while #webhookQueue > 0 and scriptActive do
             local webhookData = table.remove(webhookQueue, 1)
             
@@ -1212,6 +1225,11 @@ local function processWebhookQueue()
         end
         
         isSendingWebhook = false
+        
+        -- If there are still items in queue after finishing, restart processing
+        if #webhookQueue > 0 and scriptActive then
+            processWebhookQueue()
+        end
     end)
 end
 
@@ -2783,6 +2801,7 @@ riftStatusLabel.Parent = riftStatusFrame
 local function updateRiftStatusDisplay()
     local text = ""
     
+    -- Only show time remaining if we're actually at a rift
     if isAtRift and currentRift then
         pcall(function()
             local despawnAt = currentRift:GetAttribute("DespawnAt")
@@ -2829,11 +2848,23 @@ local function updateRiftStatusDisplay()
         end)
     end
     
-    if #riftStatusLog == 0 then
-        text = text .. "Waiting for rifts..."
+    -- Show status log or waiting message
+    if not isAtRift then
+        -- Not at a rift - show log or waiting message
+        if #riftStatusLog == 0 then
+            text = text .. "Waiting for rifts..."
+        else
+            for i = #riftStatusLog, 1, -1 do
+                text = text .. riftStatusLog[i] .. "\n"
+            end
+        end
     else
-        for i = #riftStatusLog, 1, -1 do
-            text = text .. riftStatusLog[i] .. "\n"
+        -- At a rift - show log after time remaining info
+        if #riftStatusLog > 0 then
+            text = text .. "\n"
+            for i = #riftStatusLog, 1, -1 do
+                text = text .. riftStatusLog[i] .. "\n"
+            end
         end
     end
     
