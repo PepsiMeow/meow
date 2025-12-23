@@ -830,9 +830,6 @@ local function addRiftStatusLog(message)
     print("[RIFT] " .. message)
 end
 
--- Forward declare sendRiftWebhook (defined later after processWebhookQueue)
-local sendRiftWebhook
-
 -- Return to stored position
 local function returnToStoredPosition()
     if not storedPosition or returningFromRift then return end
@@ -847,7 +844,12 @@ local function returnToStoredPosition()
         
         -- Send webhook notification (no ping)
         local playerName = p.Name or "Unknown Player"
-        sendRiftWebhook(playerName .. " has successfully teleported back from the rift.", false)
+        table.insert(webhookQueue, {
+            message = "🎯 " .. playerName .. " has successfully teleported back from the rift.",
+            isPlainText = true,
+            shouldPing = false
+        })
+        processWebhookQueue()
     end
     
     -- Always reset state regardless of teleport success/failure
@@ -994,7 +996,13 @@ local function handleRiftSpawn(rift)
         local playerName = p.Name or "Unknown Player"
         local webhookMessage = playerName .. " teleported to a " .. displayNameWithMultiplier .. " rift"
         webhookMessage = webhookMessage .. "\n**Duration:** " .. math.floor(riftDuration / 60) .. "m " .. math.floor(riftDuration % 60) .. "s"
-        sendRiftWebhook(webhookMessage, true) -- Ping enabled based on riftPingEnabled toggle
+        local actualShouldPing = riftPingEnabled -- Only ping if toggle is enabled
+        table.insert(webhookQueue, {
+            message = "🎯 " .. webhookMessage,
+            isPlainText = true,
+            shouldPing = actualShouldPing or false
+        })
+        processWebhookQueue()
         
         -- Monitor duration
         spawn(function()
@@ -1201,26 +1209,6 @@ local function processWebhookQueue()
         
         isSendingWebhook = false
     end)
-end
-
--- Send rift webhook notification (must be after processWebhookQueue is defined)
-sendRiftWebhook = function(message, shouldPing)
-    if not webhookURL or webhookURL == "" then
-        return
-    end
-    
-    -- shouldPing parameter determines if we should ping (only when teleporting TO rift, not when returning)
-    -- But only ping if riftPingEnabled toggle is ON
-    local actualShouldPing = shouldPing and riftPingEnabled
-    
-    -- Add to queue with same format as other working webhooks
-    table.insert(webhookQueue, {
-        message = "🎯 " .. message,
-        isPlainText = true,
-        shouldPing = actualShouldPing or false
-    })
-    
-    processWebhookQueue()
 end
 
 -- Public function to queue webhook (handles rate limiting)
