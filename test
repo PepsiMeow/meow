@@ -832,7 +832,9 @@ end
 
 -- Return to stored position
 local function returnToStoredPosition()
-    if not storedPosition or returningFromRift then return end
+    if not storedPosition or returningFromRift then 
+        return 
+    end
     
     returningFromRift = true -- Set flag to prevent multiple calls
     addRiftStatusLog("🔙 Returning to previous position...")
@@ -843,13 +845,16 @@ local function returnToStoredPosition()
         addRiftStatusLog("✓ Returned to previous location")
         
         -- Send webhook notification (no ping)
-        if scriptActive and webhookURL ~= "" then
+        if scriptActive and webhookURL and webhookURL ~= "" then
             local playerName = p.Name or "Unknown Player"
+            
             table.insert(webhookQueue, {
                 message = "🎯 " .. playerName .. " has successfully teleported back from the rift.",
                 isPlainText = true,
                 shouldPing = false
             })
+            
+            -- Ensure queue processing starts
             processWebhookQueue()
         end
     end
@@ -1005,16 +1010,19 @@ local function handleRiftSpawn(rift)
         addRiftStatusLog("⚡ Teleported to " .. displayNameWithMultiplier)
         
         -- Send webhook notification
-        if scriptActive and webhookURL ~= "" then
+        if scriptActive and webhookURL and webhookURL ~= "" then
             local playerName = p.Name or "Unknown Player"
             local webhookMessage = playerName .. " teleported to a " .. displayNameWithMultiplier .. " rift"
             webhookMessage = webhookMessage .. "\n**Duration:** " .. math.floor(riftDuration / 60) .. "m " .. math.floor(riftDuration % 60) .. "s"
             local actualShouldPing = riftPingEnabled -- Only ping if toggle is enabled
+            
             table.insert(webhookQueue, {
                 message = "🎯 " .. webhookMessage,
                 isPlainText = true,
                 shouldPing = actualShouldPing or false
             })
+            
+            -- Ensure queue processing starts
             processWebhookQueue()
         end
         
@@ -1088,6 +1096,7 @@ end
 -- Process webhook queue
 local function processWebhookQueue()
     -- If already processing or no items or script inactive, return
+    -- Note: If already processing, the existing loop will pick up new items
     if isSendingWebhook or #webhookQueue == 0 or not scriptActive then
         return
     end
@@ -1095,7 +1104,7 @@ local function processWebhookQueue()
     -- Start processing
     isSendingWebhook = true
     
-    spawn(function()
+    task.spawn(function()
         -- Process all items in queue
         while #webhookQueue > 0 and scriptActive do
             local webhookData = table.remove(webhookQueue, 1)
