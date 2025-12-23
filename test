@@ -75,6 +75,43 @@ local function addStatusLog(message)
     print(message)
 end
 
+-- Format egg name with multiplier prefix if available
+local function formatEggNameWithMultiplier(baseName, multiplier)
+    if multiplier and multiplier > 0 then
+        return tostring(multiplier) .. "x " .. baseName
+    end
+    return baseName
+end
+
+-- Get luck multiplier from rift (tries multiple methods)
+local function getRiftBonusLuck(rift)
+    -- Method 1: Direct attribute on rift
+    local bonusLuck = rift:GetAttribute("BonusLuck")
+    if bonusLuck then
+        return bonusLuck
+    end
+    
+    -- Method 2: Check children with "Egg" tag (as per RandomScripts.lua)
+    pcall(function()
+        for _, child in ipairs(rift:GetChildren()) do
+            if child:HasTag("Egg") then
+                local childBonusLuck = child:GetAttribute("BonusLuck")
+                if childBonusLuck then
+                    bonusLuck = childBonusLuck
+                    break
+                end
+            end
+        end
+    end)
+    
+    if bonusLuck then
+        return bonusLuck
+    end
+    
+    -- Method 3: Fallback attributes
+    return rift:GetAttribute("Luck") or rift:GetAttribute("Multiplier")
+end
+
 local function loadSettings()
     if not readfile or not isfile or not HttpService then return end
     
@@ -211,7 +248,17 @@ end
 -- Handle rift spawn
 local function handleRiftSpawn(rift)
     if isAtRift then
-        addStatusLog("⚠ Already at a rift, ignoring: " .. rift.Name)
+        -- Try to get multiplier for the ignored rift name if it's an egg
+        local ignoredRiftName = rift.Name
+        pcall(function()
+            if rift:GetAttribute("Type") == "Egg" then
+                local multiplier = getRiftBonusLuck(rift)
+                if multiplier then
+                    ignoredRiftName = formatEggNameWithMultiplier(rift.Name, multiplier)
+                end
+            end
+        end)
+        addStatusLog("⚠ Already at a rift, ignoring: " .. ignoredRiftName)
         return
     end
     
@@ -276,7 +323,17 @@ local function handleRiftSpawn(rift)
     -- Get rift position
     local riftPos = getRiftPosition(rift)
     if not riftPos then
-        addStatusLog("✗ Could not determine position for: " .. rift.Name)
+        -- Try to format error message with multiplier if it's an egg
+        local errorRiftName = rift.Name
+        pcall(function()
+            if matchedRiftInfo and matchedRiftInfo.type == "Egg" then
+                local multiplier = getRiftBonusLuck(rift)
+                if multiplier then
+                    errorRiftName = formatEggNameWithMultiplier(rift.Name, multiplier)
+                end
+            end
+        end)
+        addStatusLog("✗ Could not determine position for: " .. errorRiftName)
         return
     end
     
@@ -301,15 +358,21 @@ local function handleRiftSpawn(rift)
         
         -- Get luck multiplier for egg rifts
         if matchedRiftInfo and matchedRiftInfo.type == "Egg" then
-            luckMultiplier = rift:GetAttribute("BonusLuck") or rift:GetAttribute("Luck") or rift:GetAttribute("Multiplier")
+            luckMultiplier = getRiftBonusLuck(rift)
         end
     end)
     
-    addStatusLog("🎯 Rift detected: " .. displayName)
-    if luckMultiplier then
-        addStatusLog("   Luck Multiplier: " .. tostring(luckMultiplier) .. "x")
+    -- Format display name with multiplier prefix for egg rifts
+    local displayNameWithMultiplier = displayName
+    if matchedRiftInfo and matchedRiftInfo.type == "Egg" and luckMultiplier then
+        displayNameWithMultiplier = formatEggNameWithMultiplier(displayName, luckMultiplier)
     end
-    addStatusLog("   Duration: " .. math.floor(riftDuration / 60) .. "m " .. math.floor(riftDuration % 60) .. "s")
+    
+    -- Display duration + 1 second in logs (but wait for actual duration)
+    local displayedDuration = riftDuration + 1
+    
+    addStatusLog("🎯 Rift detected: " .. displayNameWithMultiplier)
+    addStatusLog("   Duration: " .. math.floor(displayedDuration / 60) .. "m " .. math.floor(displayedDuration % 60) .. "s")
     
     -- Set state
     currentRift = rift
@@ -319,11 +382,10 @@ local function handleRiftSpawn(rift)
     -- Teleport to rift
     local teleportPos = riftPos + Vector3.new(0, Config.HEIGHT_OFFSET, 0)
     if teleportToPosition(teleportPos) then
-        addStatusLog("⚡ Teleported to rift")
+        addStatusLog("⚡ Teleported to " .. displayNameWithMultiplier)
         
-        -- Monitor duration
+        -- Monitor duration (wait for actual duration, not displayed duration)
         spawn(function()
-            local waitStart = tick()
             task.wait(riftDuration)
             
             if isAtRift and currentRift == rift then
@@ -548,20 +610,45 @@ local function updateStatusDisplay()
             local despawnAt = currentRift:GetAttribute("DespawnAt")
             if despawnAt then
                 local serverTime = workspace:GetServerTimeNow()
-                local timeRemaining = math.max(0, despawnAt - serverTime)
-                local mins = math.floor(timeRemaining / 60)
-                local secs = math.floor(timeRemaining % 60)
+                local actualTimeRemaining = math.max(0, despawnAt - serverTime)
+                -- Display time remaining + 1 second
+                local displayedTimeRemaining = actualTimeRemaining + 1
+                local mins = math.floor(displayedTimeRemaining / 60)
+                local secs = math.floor(displayedTimeRemaining % 60)
                 
                 text = text .. "⏰ TIME REMAINING: " .. mins .. "m " .. secs .. "s\n"
                 
+                -- Get current rift display name with multiplier
+                local currentRiftDisplayName = currentRift.Name
                 if luckMultiplier then
-                    text = text .. "🍀 Luck Multiplier: " .. tostring(luckMultiplier) .. "x\n"
+                    -- Try to match current rift to get proper display name
+                    local riftNameLower = string.lower(currentRift.Name)
+                    for _, riftInfo in ipairs(Config.RIFTS) do
+                        local searchName = string.lower(riftInfo.name)
+                        if string.find(riftNameLower, searchName) then
+                            currentRiftDisplayName = formatEggNameWithMultiplier(riftInfo.displayName, luckMultiplier)
+                            break
+                        end
+                    end
+                    -- Check event eggs too
+                    if currentRiftDisplayName == currentRift.Name then
+                        for _, eggName in ipairs(Config.EVENT_EGGS) do
+                            local simplifiedEgg = eggName:lower():gsub("%s+", ""):gsub("%-", "")
+                            local simplifiedRift = riftNameLower:gsub("%s+", ""):gsub("%-", "")
+                            if string.find(simplifiedRift, simplifiedEgg, 1, true) then
+                                local formattedName = eggName:gsub("%-", " "):gsub("^%l", string.upper)
+                                currentRiftDisplayName = formatEggNameWithMultiplier(formattedName, luckMultiplier)
+                                break
+                            end
+                        end
+                    end
                 end
                 
+                text = text .. "🎯 Rift: " .. currentRiftDisplayName .. "\n"
                 text = text .. "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                 
-                -- Check if time expired
-                if timeRemaining <= 0 then
+                -- Check if actual time expired (not displayed time)
+                if actualTimeRemaining <= 0 then
                     returnToStoredPosition()
                     return
                 end
