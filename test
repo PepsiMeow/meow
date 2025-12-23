@@ -1077,7 +1077,7 @@ local function handleRiftSpawn(rift)
             local simplifiedEgg = eggName:lower():gsub("%s+", ""):gsub("%-", "")
             if string.find(simplifiedName, simplifiedEgg, 1, true) or string.find(simplifiedEgg, simplifiedName, 1, true) then
                 isSelected = true
-                displayName = eggName:gsub("%-", " "):gsub("^%l", string.upper)
+                displayName = eggName:gsub("%-", " "):gsub("^%l", function(match) return string.upper(match) end)
                 matchedRiftInfo = { name = eggName, displayName = eggName, type = "Egg" }
                 break
             end
@@ -2869,7 +2869,7 @@ local function updateRiftStatusDisplay()
                             local simplifiedEgg = eggName:lower():gsub("%s+", ""):gsub("%-", "")
                             local simplifiedRift = riftNameLower:gsub("%s+", ""):gsub("%-", "")
                             if string.find(simplifiedRift, simplifiedEgg, 1, true) then
-                                local formattedName = eggName:gsub("%-", " "):gsub("^%l", string.upper)
+                                local formattedName = eggName:gsub("%-", " "):gsub("^%l", function(match) return string.upper(match) end)
                                 currentRiftDisplayName = formatEggNameWithMultiplier(formattedName, luckMultiplier)
                                 break
                             end
