@@ -2128,6 +2128,30 @@ intervalDesc.TextYAlignment = Enum.TextYAlignment.Top
 intervalDesc.TextWrapped = true
 intervalDesc.Parent = extraContent
 
+-- Legendary Detection button (middle-left, moved from Detection tab)
+local legendaryBtn = Instance.new("TextButton")
+legendaryBtn.Size = UDim2.new(0, 155, 0, 28)
+legendaryBtn.Position = UDim2.new(0, 15, 0, 110)
+legendaryBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+legendaryBtn.Text = "Legendary Detection: OFF"
+legendaryBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+legendaryBtn.TextSize = 10
+legendaryBtn.Font = Enum.Font.GothamBold
+legendaryBtn.BorderSizePixel = 0
+legendaryBtn.Parent = extraContent
+
+local legendaryDesc = Instance.new("TextLabel")
+legendaryDesc.Size = UDim2.new(0, 155, 0, 22)
+legendaryDesc.Position = UDim2.new(0, 15, 0, 142)
+legendaryDesc.BackgroundTransparency = 1
+legendaryDesc.Text = "Toggle legendary detection (pings by default)"
+legendaryDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
+legendaryDesc.TextSize = 8
+legendaryDesc.Font = Enum.Font.Gotham
+legendaryDesc.TextXAlignment = Enum.TextXAlignment.Left
+legendaryDesc.TextYAlignment = Enum.TextYAlignment.Top
+legendaryDesc.TextWrapped = true
+legendaryDesc.Parent = extraContent
 
 -- Player tracking button (middle-right)
 local playerBtn = Instance.new("TextButton")
@@ -2187,7 +2211,8 @@ confirmFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 confirmFrame.BorderSizePixel = 2
 confirmFrame.BorderColor3 = Color3.fromRGB(200, 50, 50)
 confirmFrame.Visible = false
-confirmFrame.ZIndex = 10
+confirmFrame.ZIndex = 20
+confirmFrame.AnchorPoint = Vector2.new(0.5, 0.5)
 confirmFrame.Parent = g
 
 local confirmTitle = Instance.new("TextLabel")
@@ -2198,7 +2223,7 @@ confirmTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
 confirmTitle.TextSize = 16
 confirmTitle.Font = Enum.Font.GothamBold
 confirmTitle.BorderSizePixel = 0
-confirmTitle.ZIndex = 11
+confirmTitle.ZIndex = 21
 confirmTitle.Parent = confirmFrame
 
 local confirmText = Instance.new("TextLabel")
@@ -2210,7 +2235,7 @@ confirmText.TextColor3 = Color3.fromRGB(255, 255, 255)
 confirmText.TextSize = 12
 confirmText.Font = Enum.Font.Gotham
 confirmText.TextWrapped = true
-confirmText.ZIndex = 11
+confirmText.ZIndex = 21
 confirmText.Parent = confirmFrame
 
 local yesBtn = Instance.new("TextButton")
@@ -2222,7 +2247,7 @@ yesBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 yesBtn.TextSize = 12
 yesBtn.Font = Enum.Font.GothamBold
 yesBtn.BorderSizePixel = 0
-yesBtn.ZIndex = 11
+yesBtn.ZIndex = 21
 yesBtn.Parent = confirmFrame
 
 local noBtn = Instance.new("TextButton")
@@ -2234,7 +2259,7 @@ noBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 noBtn.TextSize = 12
 noBtn.Font = Enum.Font.GothamBold
 noBtn.BorderSizePixel = 0
-noBtn.ZIndex = 11
+noBtn.ZIndex = 21
 noBtn.Parent = confirmFrame
 
 -- ==================== SECRET DETECTION SETTINGS SUB-MENU ====================
@@ -2614,7 +2639,8 @@ adminAbuseConfirmFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 adminAbuseConfirmFrame.BorderSizePixel = 2
 adminAbuseConfirmFrame.BorderColor3 = Color3.fromRGB(200, 150, 50)
 adminAbuseConfirmFrame.Visible = false
-adminAbuseConfirmFrame.ZIndex = 10
+adminAbuseConfirmFrame.ZIndex = 20
+adminAbuseConfirmFrame.AnchorPoint = Vector2.new(0.5, 0.5)
 adminAbuseConfirmFrame.Parent = g
 
 local adminAbuseConfirmTitle = Instance.new("TextLabel")
@@ -2625,7 +2651,7 @@ adminAbuseConfirmTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
 adminAbuseConfirmTitle.TextSize = 14
 adminAbuseConfirmTitle.Font = Enum.Font.GothamBold
 adminAbuseConfirmTitle.BorderSizePixel = 0
-adminAbuseConfirmTitle.ZIndex = 11
+adminAbuseConfirmTitle.ZIndex = 21
 adminAbuseConfirmTitle.Parent = adminAbuseConfirmFrame
 
 local adminAbuseConfirmText = Instance.new("TextLabel")
@@ -2637,7 +2663,7 @@ adminAbuseConfirmText.TextColor3 = Color3.fromRGB(255, 255, 255)
 adminAbuseConfirmText.TextSize = 11
 adminAbuseConfirmText.Font = Enum.Font.Gotham
 adminAbuseConfirmText.TextWrapped = true
-adminAbuseConfirmText.ZIndex = 11
+adminAbuseConfirmText.ZIndex = 21
 adminAbuseConfirmText.Parent = adminAbuseConfirmFrame
 
 local adminAbuseYesBtn = Instance.new("TextButton")
@@ -2649,19 +2675,19 @@ adminAbuseYesBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 adminAbuseYesBtn.TextSize = 11
 adminAbuseYesBtn.Font = Enum.Font.GothamBold
 adminAbuseYesBtn.BorderSizePixel = 0
-adminAbuseYesBtn.ZIndex = 11
+adminAbuseYesBtn.ZIndex = 21
 adminAbuseYesBtn.Parent = adminAbuseConfirmFrame
 
 local adminAbuseNoBtn = Instance.new("TextButton")
 adminAbuseNoBtn.Size = UDim2.new(0, 130, 0, 35)
 adminAbuseNoBtn.Position = UDim2.new(1, -145, 1, -50)
-adminAbuseNoBtn.BackgroundColor3 = Color3.fromRGB(80, 140, 80)
+adminAbuseNoBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
 adminAbuseNoBtn.Text = "Cancel"
 adminAbuseNoBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 adminAbuseNoBtn.TextSize = 11
 adminAbuseNoBtn.Font = Enum.Font.GothamBold
 adminAbuseNoBtn.BorderSizePixel = 0
-adminAbuseNoBtn.ZIndex = 11
+adminAbuseNoBtn.ZIndex = 21
 adminAbuseNoBtn.Parent = adminAbuseConfirmFrame
 
 adminAbuseToggleBtn.Activated:Connect(function()
@@ -2683,6 +2709,7 @@ adminAbuseToggleBtn.Activated:Connect(function()
 end)
 
 adminAbuseYesBtn.Activated:Connect(function()
+    if not scriptActive then return end
     -- Turn OFF admin abuse mode and send summary
     adminAbuseActive = false
     adminAbuseToggleBtn.Text = "Admin Abuse Mode: OFF"
@@ -2696,11 +2723,13 @@ adminAbuseYesBtn.Activated:Connect(function()
 end)
 
 adminAbuseNoBtn.Activated:Connect(function()
+    if not scriptActive then return end
     adminAbuseConfirmFrame.Visible = false
 end)
 
 -- Close Script button - opens confirmation dialog
 closeScriptBtn.Activated:Connect(function()
+    if not scriptActive then return end
     confirmFrame.Visible = true
 end)
 
@@ -2842,6 +2871,7 @@ end)
 
 -- Hide X button - hides main GUI
 hideXBtn.Activated:Connect(function()
+    if not scriptActive then return end
     f.Visible = false
     toggleBtn.Text = ">>>"
     toggleBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
@@ -2849,6 +2879,7 @@ end)
 
 -- Toggle button - shows/hides main GUI
 toggleBtn.Activated:Connect(function()
+    if not scriptActive then return end
     f.Visible = not f.Visible
     if f.Visible then
         toggleBtn.Text = "GUI"
@@ -2877,10 +2908,14 @@ end)
 
 -- Yes button - closes everything
 yesBtn.Activated:Connect(function()
+    if not scriptActive then return end
     print("Closing script...")
     
     -- Mark script as inactive
     scriptActive = false
+    
+    -- Hide confirmation dialog
+    confirmFrame.Visible = false
     
     -- Stop auto hatch
     autoHatchEnabled = false
@@ -2907,6 +2942,7 @@ end)
 
 -- No button - closes confirmation dialog
 noBtn.Activated:Connect(function()
+    if not scriptActive then return end
     confirmFrame.Visible = false
 end)
 
