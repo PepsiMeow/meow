@@ -1,79 +1,715 @@
--- RIFT AUTO FLY SCRIPT V2
--- Simplified: Only detects selected rifts and teleports to them
--- Version 3.0 - Optimized
+-- BUBBLEGUM SIMULATOR - AUTO HATCH & SECRET NOTIFIER
+-- Version 5.0 - Optimized & Refactored (GUI Reorganized)
 
-local P = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local HttpService = game:GetService("HttpService")
-local p = P.LocalPlayer
-
-print("========================================")
-print("RIFT AUTO FLY SCRIPT V2")
-print("Version: 3.0 - Simplified & Optimized")
-print("========================================")
-
+-- Constants & Config
 local Config = {
-    HEIGHT_OFFSET = 15, -- Teleport height above rift
-    SETTINGS_FILE = "rift_auto_fly_v2_settings.json",
-    
+    VERSION = "5.0",
+    SETTINGS_FILE = "bubblegum_settings.json",
+    SPECIAL_PETS = {
+        "Morning Star", "Christmas Robot", "Rumblecon God",
+        "The Leviathan", "Sylently's Pet", "Giant Nert's Pufferfish"
+    },
+    RIFT_HEIGHT_OFFSET = 15,
     RIFTS = {
         {name = "2026-egg", displayName = "2026 Egg Rift", type = "Egg"},
         {name = "peppermint-chest", displayName = "Peppermint Chest", type = "Chest"}
     },
-
-    -- Event egg rifts that can be detected via the "All Egg Rifts" toggle
-    -- Note: Rift names in-game use dashes (e.g., "spikey-egg"), but matching handles both dashes and spaces
     EVENT_EGGS = {
-        "spikey-egg",
-        "magma-egg",
-        "crystal-egg",
-        "lunar-egg",
-        "void-egg",
-        "hell-egg",
-        "nightmare-egg",
-        "rainbow-egg",
-        "festive-egg",
-        "gingerbread-egg",
-        "candycane-egg",
-        "aurora-egg",
-        "yuletide-egg",
-        "northpole-egg",
-        "snowman-egg",
-        "showman-egg", -- in case it's spelled this way internally
-        "mining-egg",
-        "neon-egg"
+        "spikey-egg", "magma-egg", "crystal-egg", "lunar-egg", "void-egg",
+        "hell-egg", "nightmare-egg", "rainbow-egg", "festive-egg", "gingerbread-egg",
+        "candycane-egg", "aurora-egg", "yuletide-egg", "northpole-egg", "snowman-egg",
+        "showman-egg", "mining-egg", "neon-egg"
     }
 }
 
--- State
-local scriptActive = true
+-- Services
+local P = game:GetService("Players")
+local RS = game:GetService("ReplicatedStorage")
+local UIS = game:GetService("UserInputService")
+local VIM = game:GetService("VirtualInputManager")
+local HttpService = game:GetService("HttpService")
+local TextChatService = game:GetService("TextChatService")
+local RunService = game:GetService("RunService")
+local p = P.LocalPlayer
+
+-- Pre-compute lowercase special pets for faster lookup
+local SPECIAL_PETS_LOWER = {}
+for _, petName in ipairs(Config.SPECIAL_PETS) do
+    SPECIAL_PETS_LOWER[string.lower(petName)] = true
+end
+
+print("========================================")
+print("BUBBLEGUM AUTO HATCH & NOTIFIER")
+print("Version: " .. Config.VERSION)
+print("========================================")
+print("✓ Script started")
+
+-- Load required modules
+local Remote, ItemUtil, PetsData, PetUtil, FormatCommas, LocalData
+
+-- Settings
+local autoHatchEnabled = false
+local webhookURL = ""
+local discordUserID = ""
+local playerTrackingEnabled = true
+local eggCountMonitoringEnabled = true
+local eggMonitorIntervalHours = 1
+local secretNotifyNormal = true
+local secretNotifyShiny = false
+local secretNotifyMythic = false
+local secretNotifyShinyMythic = false
+local secretNotifyXL = false
+local secretPingNormal = false
+local secretPingShiny = false
+local secretPingMythic = false
+local secretPingShinyMythic = false
+local secretPingXL = false
+local secretFilterUnder1B = false
+local infinityNotifyEnabled = true
+local infinityPingEnabled = true
+local xlDetectionEnabled = false
+local xlPingEnabled = false
+local legendaryDetectionEnabled = false
+local legendaryPingEnabled = false
+
+-- Rift Detection
 local riftDetectionEnabled = false
-local allEggRiftsEnabled = false
+local riftPingEnabled = false
 local riftSelections = {
     ["2026-egg"] = false,
     ["peppermint-chest"] = false
 }
-
+local allEggRiftsEnabled = false
 local isAtRift = false
 local storedPosition = nil
 local currentRift = nil
 local riftStartTime = nil
 local riftDuration = 0
 local luckMultiplier = nil
-local knownRifts = {} -- Track rifts that already existed when script started
+local knownRifts = {}
+local riftStatusLog = {}
+local maxRiftLogEntries = 50
 
--- Status log
-local statusLog = {}
-local maxLogEntries = 50
+-- Admin Abuse Mode
+local adminAbuseActive = false
+local adminAbuseSecretSettings = {
+    notifyNormal = true, notifyShiny = true, notifyMythic = true,
+    notifyShinyMythic = true, notifyXL = true,
+    pingNormal = false, pingShiny = false, pingMythic = false,
+    pingShinyMythic = true, pingXL = true, filterUnder1B = false
+}
+local adminAbuseHatchedPets = {}
+local adminAbuseStartTime = nil
+local adminAbuseStartEggCount = nil
+local scriptStartTime = os.time()
 
--- Utilities
-local function addStatusLog(message)
-    table.insert(statusLog, os.date("%H:%M:%S") .. " - " .. message)
-    if #statusLog > maxLogEntries then
-        table.remove(statusLog, 1)
+-- Load settings from file
+local function loadSettings()
+    if not readfile or not isfile or not HttpService then
+        print("⚠ Cannot load settings: File system not available, using defaults")
+        return
     end
-    print(message)
+    
+    local success, result = pcall(function()
+        if isfile(Config.SETTINGS_FILE) then
+            local content = readfile(Config.SETTINGS_FILE)
+            if content and content ~= "" then
+                local decoded = HttpService:JSONDecode(content)
+                if decoded and type(decoded) == "table" then
+                    -- Load string settings
+                    if decoded.webhookURL and type(decoded.webhookURL) == "string" then webhookURL = decoded.webhookURL end
+                    if decoded.discordUserID and type(decoded.discordUserID) == "string" then discordUserID = decoded.discordUserID end
+                    -- Load boolean settings (simplified)
+                    if decoded.playerTrackingEnabled ~= nil then playerTrackingEnabled = decoded.playerTrackingEnabled end
+                    if decoded.eggCountMonitoringEnabled ~= nil then eggCountMonitoringEnabled = decoded.eggCountMonitoringEnabled end
+                    if decoded.eggMonitorIntervalHours and type(decoded.eggMonitorIntervalHours) == "number" then eggMonitorIntervalHours = decoded.eggMonitorIntervalHours end
+                    if decoded.secretNotifyNormal ~= nil then secretNotifyNormal = decoded.secretNotifyNormal end
+                    if decoded.secretNotifyShiny ~= nil then secretNotifyShiny = decoded.secretNotifyShiny end
+                    if decoded.secretNotifyMythic ~= nil then secretNotifyMythic = decoded.secretNotifyMythic end
+                    if decoded.secretNotifyShinyMythic ~= nil then secretNotifyShinyMythic = decoded.secretNotifyShinyMythic end
+                    if decoded.secretNotifyXL ~= nil then secretNotifyXL = decoded.secretNotifyXL end
+                    if decoded.secretPingNormal ~= nil then secretPingNormal = decoded.secretPingNormal end
+                    if decoded.secretPingShiny ~= nil then secretPingShiny = decoded.secretPingShiny end
+                    if decoded.secretPingMythic ~= nil then secretPingMythic = decoded.secretPingMythic end
+                    if decoded.secretPingShinyMythic ~= nil then secretPingShinyMythic = decoded.secretPingShinyMythic end
+                    if decoded.secretPingXL ~= nil then secretPingXL = decoded.secretPingXL end
+                    if decoded.secretFilterUnder1B ~= nil then secretFilterUnder1B = decoded.secretFilterUnder1B end
+                    if decoded.infinityNotifyEnabled ~= nil then infinityNotifyEnabled = decoded.infinityNotifyEnabled end
+                    if decoded.infinityPingEnabled ~= nil then infinityPingEnabled = decoded.infinityPingEnabled end
+                    if decoded.xlDetectionEnabled ~= nil then xlDetectionEnabled = decoded.xlDetectionEnabled end
+                    if decoded.xlPingEnabled ~= nil then xlPingEnabled = decoded.xlPingEnabled end
+                    if decoded.legendaryDetectionEnabled ~= nil then legendaryDetectionEnabled = decoded.legendaryDetectionEnabled end
+                    if decoded.legendaryPingEnabled ~= nil then legendaryPingEnabled = decoded.legendaryPingEnabled end
+                    if decoded.riftDetectionEnabled ~= nil then riftDetectionEnabled = decoded.riftDetectionEnabled end
+                    if decoded.riftPingEnabled ~= nil then riftPingEnabled = decoded.riftPingEnabled end
+                    if decoded.allEggRiftsEnabled ~= nil then allEggRiftsEnabled = decoded.allEggRiftsEnabled end
+                    if decoded.riftSelections and type(decoded.riftSelections) == "table" then
+                        for name, enabled in pairs(decoded.riftSelections) do
+                            if riftSelections[name] ~= nil then
+                                riftSelections[name] = enabled
+                            end
+                        end
+                    end
+                    if decoded.adminAbuseSecretSettings and type(decoded.adminAbuseSecretSettings) == "table" then adminAbuseSecretSettings = decoded.adminAbuseSecretSettings end
+                    print("✓ Settings loaded from file")
+                    return true
+                end
+            end
+        end
+        return false
+    end)
+    
+    if not success then
+        print("⚠ Failed to load settings (using defaults): " .. tostring(result))
+    elseif not result then
+        print("⚠ No settings file found, using defaults")
+    end
 end
+
+-- Save settings to file
+local function saveSettings()
+    if not writefile or not HttpService then
+        print("⚠ Cannot save settings: File system not available")
+        return
+    end
+    
+    local success, err = pcall(function()
+        local settings = {
+            webhookURL = webhookURL or "", discordUserID = discordUserID or "",
+            playerTrackingEnabled = playerTrackingEnabled,
+            eggCountMonitoringEnabled = eggCountMonitoringEnabled,
+            eggMonitorIntervalHours = eggMonitorIntervalHours,
+            secretNotifyNormal = secretNotifyNormal, secretNotifyShiny = secretNotifyShiny,
+            secretNotifyMythic = secretNotifyMythic, secretNotifyShinyMythic = secretNotifyShinyMythic,
+            secretNotifyXL = secretNotifyXL, secretPingNormal = secretPingNormal,
+            secretPingShiny = secretPingShiny, secretPingMythic = secretPingMythic,
+            secretPingShinyMythic = secretPingShinyMythic, secretPingXL = secretPingXL,
+            secretFilterUnder1B = secretFilterUnder1B,
+            infinityNotifyEnabled = infinityNotifyEnabled, infinityPingEnabled = infinityPingEnabled,
+            xlDetectionEnabled = xlDetectionEnabled, xlPingEnabled = xlPingEnabled,
+            legendaryDetectionEnabled = legendaryDetectionEnabled, legendaryPingEnabled = legendaryPingEnabled,
+            riftDetectionEnabled = riftDetectionEnabled, riftPingEnabled = riftPingEnabled,
+            allEggRiftsEnabled = allEggRiftsEnabled, riftSelections = riftSelections,
+            adminAbuseSecretSettings = adminAbuseSecretSettings
+        }
+        local json = HttpService:JSONEncode(settings)
+        writefile(Config.SETTINGS_FILE, json)
+    end)
+    
+    if success then
+        print("✓ Settings saved")
+    else
+        print("✗ Failed to save settings: " .. tostring(err))
+    end
+end
+
+-- Webhook queue for rate limiting
+local webhookQueue = {}
+local isSendingWebhook = false
+local messagesRemainingWithDelay = 0 -- Counter for messages that need 2s delay after rate limit
+
+-- Cache for thumbnail URLs to avoid repeated HTTP requests
+local thumbnailUrlCache = {}
+
+-- Script state
+local scriptActive = true
+local hatchEventConnection = nil
+
+-- Load modules
+local function loadModules()
+    -- Load Remote
+    local success, remoteModule = pcall(function()
+        return require(RS.Shared.Framework.Network.Remote)
+    end)
+    if success and remoteModule then
+        Remote = remoteModule
+        print("✓ Loaded Remote module")
+    end
+    
+    -- Load ItemUtil
+    local success2, itemUtil = pcall(function()
+        return require(RS.Shared.Utils.Stats.ItemUtil)
+    end)
+    if success2 and itemUtil then
+        ItemUtil = itemUtil
+        print("✓ Loaded ItemUtil")
+    end
+    
+    -- Load Pets data for images
+    local success3, petsData = pcall(function()
+        return require(RS.Shared.Data.Pets)
+    end)
+    if success3 and petsData then
+        PetsData = petsData
+        print("✓ Loaded Pets data")
+    end
+    
+    -- Load PetUtil for chance calculation
+    local success4, petUtil = pcall(function()
+        return require(RS.Shared.Utils.Stats.PetUtil)
+    end)
+    if success4 and petUtil then
+        PetUtil = petUtil
+        print("✓ Loaded PetUtil")
+    end
+    
+    -- Load FormatCommas for number formatting
+    local success5, formatCommas = pcall(function()
+        return require(RS.Shared.Framework.Utilities.String.FormatCommas)
+    end)
+    if success5 and formatCommas then
+        FormatCommas = formatCommas
+        print("✓ Loaded FormatCommas")
+    end
+    
+    -- Load LocalData for player stats
+    local success6, localData = pcall(function()
+        return require(RS.Client.Framework.Services.LocalData)
+    end)
+    if success6 and localData then
+        LocalData = localData
+        print("✓ Loaded LocalData")
+    end
+end
+
+loadModules()
+
+loadSettings()
+
+-- HTTP library initialization
+local httpLib = nil
+local httpLibName = nil
+if request then
+    httpLib = function(url, method, headers, body)
+        local success, res, err = pcall(function()
+            return request({Url=url, Method=method, Headers=headers or {}, Body=body})
+        end)
+        if success and res then
+            local status = res.StatusCode or (res.Success and 200 or (res.success and 200 or 0))
+            local body = res.Body or res.body or ""
+            local ok = res.Success or res.success or status == 200 or status == 204
+            return ok, body, status
+        end
+        return false, err or "Request exception", 0
+    end
+    httpLibName = "request"
+end
+
+-- Get Discord thumbnail URL from Roblox asset ID (with caching)
+local function getThumbnailUrl(assetId)
+    if not assetId then
+        return nil
+    end
+    
+    -- Check cache first
+    if thumbnailUrlCache[assetId] then
+        return thumbnailUrlCache[assetId]
+    end
+    
+    local url = "https://thumbnails.roproxy.com/v1/assets?assetIds=" .. assetId .. "&size=420x420&format=Png&isCircular=false"
+    
+    local success, response, errorMsg = pcall(function()
+        -- Try httpLib first (we know this works for webhooks)
+        if httpLib then
+            local ok, body, status = httpLib(url, "GET", {}, "")
+            if ok and status == 200 then
+                return body, nil
+            else
+                return nil, "httpLib returned status " .. tostring(status)
+            end
+        elseif HttpService and HttpService.GetAsync then
+            return HttpService:GetAsync(url), nil
+        else
+            return nil, "No HTTP method available"
+        end
+    end)
+    
+    if not success then
+        return nil
+    end
+    
+    if not response then
+        return nil
+    end
+    
+    -- Try to decode JSON
+    local success2, decoded = pcall(function()
+        if HttpService and HttpService.JSONDecode then
+            return HttpService:JSONDecode(response)
+        end
+        return nil
+    end)
+    
+    if not success2 then
+        return nil
+    end
+    
+    if decoded and decoded.data and decoded.data[1] and decoded.data[1].imageUrl then
+        local imageUrl = decoded.data[1].imageUrl
+        -- Cache the result
+        thumbnailUrlCache[assetId] = imageUrl
+        return imageUrl
+    end
+    
+    return nil
+end
+
+-- JSON encoder (use HttpService if available, fallback to custom)
+local function jsonEncode(t)
+    if HttpService and HttpService.JSONEncode then
+        local success, result = pcall(function()
+            return HttpService:JSONEncode(t)
+        end)
+        if success then
+            return result
+        end
+    end
+    -- Fallback custom encoder (for compatibility)
+    local function encodeValue(v, depth)
+        depth = depth or 0
+        if depth > 10 then return "null" end
+        if type(v) == "string" then
+            v = v:gsub("\\", "\\\\"):gsub('"', '\\"'):gsub("\n", "\\n"):gsub("\r", "\\r"):gsub("\t", "\\t")
+            return '"' .. v .. '"'
+        elseif type(v) == "number" then
+            return tostring(v)
+        elseif type(v) == "boolean" then
+            return v and "true" or "false"
+        elseif type(v) == "table" then
+            local isArray = false
+            local maxIndex = 0
+            for k in pairs(v) do
+                if type(k) == "number" then
+                    maxIndex = math.max(maxIndex, k)
+                end
+            end
+            isArray = maxIndex > 0 and maxIndex == #v
+            local parts = {}
+            if isArray then
+                for i = 1, maxIndex do
+                    table.insert(parts, encodeValue(v[i], depth + 1))
+                end
+                return "[" .. table.concat(parts, ",") .. "]"
+            else
+                for k, val in pairs(v) do
+                    if val ~= nil then
+                        local key = type(k) == "string" and ('"' .. k .. '"') or tostring(k)
+                        table.insert(parts, key .. ":" .. encodeValue(val, depth + 1))
+                    end
+                end
+                return "{" .. table.concat(parts, ",") .. "}"
+            end
+        else
+            return "null"
+        end
+    end
+    return encodeValue(t, 0)
+end
+
+-- Get embed color based on pet attributes
+local function getEmbedColor(shiny, mythic, xl, isSpecialPet)
+    if isSpecialPet then
+        -- Infinity pet colors
+        if shiny and mythic and xl then
+            return 8388608 -- Maroon #800000
+        elseif mythic and xl then
+            return 14745599 -- Pastel pink/purple #E0B0FF
+        elseif shiny and xl then
+            return 12779520 -- Bright lime green lighter #C2FF00
+        elseif shiny and mythic then
+            return 16738740 -- Bright hot pink #FF1493
+        elseif xl then
+            return 16760576 -- Orange closer to yellow #FFA700
+        elseif mythic then
+            return 16711935 -- Bright magenta #FF00FF
+        elseif shiny then
+            return 65280 -- Bright pure green #00FF00
+        else
+            return 65535 -- Cyan #00FFFF
+        end
+    else
+        -- Regular pet colors
+        if shiny and mythic and xl then
+            return 13369344 -- Darker red #CC0000
+        elseif mythic and xl then
+            return 255 -- Dark bright blue #0000FF
+        elseif shiny and xl then
+            return 16776960 -- Pure yellow #FFFF00
+        elseif shiny and mythic then
+            return 16711680 -- Pure red #FF0000
+        elseif xl then
+            return 16744448 -- Deep bright orange #FF6600
+        elseif mythic then
+            return 10494192 -- Purple #A020F0
+        elseif shiny then
+            return 16766720 -- Slightly darker yellow but bright (Gold) #FFD700
+        else
+            return 12303291 -- Light grey #BBBBBB
+        end
+    end
+end
+
+-- Check if pet is in special pets list (case insensitive)
+local function isSpecialPet(petName)
+    if not petName then return false end
+    return SPECIAL_PETS_LOWER[string.lower(petName)] == true
+end
+
+-- Check if rarity is Infinity (case insensitive)
+local function isInfinityRarity(rarity)
+    if not rarity then return false end
+    return string.lower(tostring(rarity)) == "infinity"
+end
+
+-- Format number with commas
+local function formatNumber(num)
+    if not num then return "0" end
+    if FormatCommas then
+        return FormatCommas(num)
+    end
+    return tostring(num):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
+end
+
+-- Build full pet name with variants
+local function buildFullPetName(petName, shiny, mythic, xl)
+    local prefix = ""
+    if shiny and mythic then
+        prefix = "Shiny Mythic "
+    elseif shiny then
+        prefix = "Shiny "
+    elseif mythic then
+        prefix = "Mythic "
+    end
+    if xl then
+        prefix = prefix .. "XL "
+    end
+    return prefix .. petName
+end
+
+-- Get article (a/an) for pet name
+local function getArticle(petName, shiny, mythic)
+    if shiny or mythic then return "a" end
+    if not petName then return "a" end
+    local firstLetter = string.lower(string.sub(petName, 1, 1))
+    if firstLetter == "a" or firstLetter == "e" or firstLetter == "i" or firstLetter == "o" or firstLetter == "u" then
+        return "an"
+    end
+    return "a"
+end
+
+-- Calculate probability text
+local function getProbabilityText(pet)
+    if not PetUtil or not pet then return nil end
+    local success, petChance = pcall(function()
+        return PetUtil:GetChance(pet)
+    end)
+    if success and petChance and petChance > 0 then
+        local denominator = math.ceil(100 / petChance)
+        return "1/" .. formatNumber(denominator)
+    end
+    return nil
+end
+
+-- Function to send plain text webhook
+local function sendPlainTextWebhook(message, shouldPing)
+    if not httpLib or webhookURL == "" then 
+        return true
+    end
+    
+    local content = message
+    if shouldPing and discordUserID ~= "" then
+        content = "<@" .. discordUserID .. "> " .. message
+    end
+    
+    local payload = {
+        content = content
+    }
+    
+    local jsonPayload = jsonEncode(payload)
+    
+    local success, response, status = pcall(function()
+        return httpLib(webhookURL, "POST", {
+            ["Content-Type"] = "application/json"
+        }, jsonPayload)
+    end)
+    
+    if success and (status == 200 or status == 204) then
+        return true
+    elseif success and status == 429 then
+        return false -- Return false to trigger retry
+    else
+        return true -- Return true for other errors to not retry
+    end
+end
+
+-- Function to send debug webhook (no ping, plain text)
+local function sendDebugWebhook(message)
+    if not httpLib or webhookURL == "" then 
+        return true
+    end
+    
+    local embed = {
+        title = "🔍 Debug Info",
+        description = message,
+        color = 8421504, -- Grey color for debug
+        timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+    }
+    
+    local payload = {
+        embeds = {embed}
+        -- No content field = no ping
+    }
+    
+    local jsonPayload = jsonEncode(payload)
+    
+    local success, response, status = pcall(function()
+        return httpLib(webhookURL, "POST", {
+            ["Content-Type"] = "application/json"
+        }, jsonPayload)
+    end)
+    
+    if success and status == 200 then
+        print("✓ Debug webhook sent successfully")
+        return true
+    elseif success and status == 429 then
+        print("✗ Debug webhook rate limited (429)")
+        return false -- Return false to trigger retry
+    else
+        print("✗ Debug webhook failed: status=" .. tostring(status))
+        return true -- Return true for other errors to not retry
+    end
+end
+
+-- Get total eggs hatched count
+local function getTotalEggsHatched()
+    if not LocalData then
+        return nil
+    end
+    
+    local success, data = pcall(function()
+        return LocalData:Get() -- Use :Get() not :GetData()
+    end)
+    
+    if not success or not data then
+        return nil
+    end
+    
+    if not data.Stats then
+        return nil
+    end
+    
+    -- Try multiple possible field names
+    local hatches = data.Stats.Hatches 
+        or data.Stats.TotalEggsOpened 
+        or data.Stats["🥚Hatches"]
+        or data.Stats["🥚 Hatches"]
+    
+    return hatches
+end
+
+-- ============================================================
+-- PET NOTIFICATION FUNCTIONS
+-- ============================================================
+
+-- Unified function to send pet notification webhook
+local function sendPetNotificationWebhook(petName, shiny, mythic, xl, eggName, rarity, pet, petImageUrl, notificationType, shouldPing)
+    if not httpLib or webhookURL == "" then 
+        return true
+    end
+    
+    local playerName = p.Name or "Unknown Player"
+    local eggsHatched = getTotalEggsHatched()
+    local fullPetName = buildFullPetName(petName, shiny, mythic, xl)
+    local article = getArticle(petName, shiny, mythic)
+    
+    -- Determine title and color based on notification type
+    local title, embedColor
+    local isInfinity = (notificationType == "infinity")
+    
+    if isInfinity then
+        title = "🎉 Congratulations! You hatched an ***INFINITY***! 🎉"
+        embedColor = getEmbedColor(shiny, mythic, xl, true)
+    elseif notificationType == "xl" then
+        title = "🎉 XL Pet Hatched!"
+        embedColor = 11053224 -- Light grey
+    elseif notificationType == "legendary" then
+        title = "✨ Legendary Pet Hatched!"
+        embedColor = 11053224 -- Light grey
+    else
+        title = "🎉 Congratulations!"
+        embedColor = getEmbedColor(shiny, mythic, xl, false)
+    end
+    
+    local mention = (shouldPing and discordUserID ~= "") and ("<@" .. discordUserID .. ">") or ""
+    local description = "**" .. playerName .. "** hatched " .. article .. " **" .. fullPetName .. "**!"
+    
+    -- Build fields
+    local fields = {{name = "Hatched", value = fullPetName, inline = false}}
+    
+    -- Add probability or rarity field (skip for XL/Legendary simple format)
+    if notificationType ~= "xl" and notificationType ~= "legendary" then
+        local probabilityText = getProbabilityText(pet)
+        if probabilityText then
+            table.insert(fields, {name = "Rarity", value = probabilityText, inline = true})
+        elseif rarity then
+            table.insert(fields, {name = "Rarity", value = rarity, inline = true})
+        end
+    end
+    
+    -- Build embed
+    local embed = {
+        title = title,
+        description = description,
+        color = embedColor,
+        fields = fields,
+        timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+    }
+    
+    if petImageUrl then
+        embed.thumbnail = {url = petImageUrl}
+    end
+    
+    if eggsHatched then
+        embed.footer = {text = "Eggs hatched: " .. formatNumber(eggsHatched)}
+    end
+    
+    local payload = {
+        content = mention ~= "" and mention or nil,
+        embeds = {embed}
+    }
+    
+    local jsonPayload = jsonEncode(payload)
+    local success, response, status = pcall(function()
+        return httpLib(webhookURL, "POST", {["Content-Type"] = "application/json"}, jsonPayload)
+    end)
+    
+    if success and (status == 200 or status == 204) then
+        return true
+    elseif success and status == 429 then
+        return false -- Retry on rate limit
+    else
+        return true -- Don't retry other errors
+    end
+end
+
+-- Legacy function wrappers for backward compatibility
+local function sendSpecialDiscordNotificationInternal(petName, shiny, mythic, xl, eggName, rarity, pet, petImageUrl, isInfinity, shouldPing)
+    return sendPetNotificationWebhook(petName, shiny, mythic, xl, eggName, rarity, pet, petImageUrl, "infinity", shouldPing)
+end
+
+local function sendXLNotification(petName, shiny, mythic, xl, petImageUrl, shouldPing)
+    return sendPetNotificationWebhook(petName, shiny, mythic, xl, nil, nil, nil, petImageUrl, "xl", shouldPing)
+end
+
+local function sendLegendaryNotification(petName, shiny, mythic, xl, petImageUrl, shouldPing)
+    return sendPetNotificationWebhook(petName, shiny, mythic, xl, nil, nil, nil, petImageUrl, "legendary", shouldPing)
+end
+
+local function sendDiscordNotificationInternal(petName, shiny, mythic, xl, eggName, rarity, pet, petImageUrl, shouldPing)
+    return sendPetNotificationWebhook(petName, shiny, mythic, xl, eggName, rarity, pet, petImageUrl, "secret", shouldPing)
+end
+
+-- ==================== RIFT DETECTION FUNCTIONS ====================
 
 -- Format egg name with multiplier prefix if available
 local function formatEggNameWithMultiplier(baseName, multiplier)
@@ -110,49 +746,6 @@ local function getRiftBonusLuck(rift)
     
     -- Method 3: Fallback attributes
     return rift:GetAttribute("Luck") or rift:GetAttribute("Multiplier")
-end
-
-local function loadSettings()
-    if not readfile or not isfile or not HttpService then return end
-    
-    pcall(function()
-        if isfile(Config.SETTINGS_FILE) then
-            local content = readfile(Config.SETTINGS_FILE)
-            if content and content ~= "" then
-                local decoded = HttpService:JSONDecode(content)
-                if decoded then
-                    if decoded.riftDetectionEnabled ~= nil then
-                        riftDetectionEnabled = decoded.riftDetectionEnabled
-                    end
-                    if decoded.allEggRiftsEnabled ~= nil then
-                        allEggRiftsEnabled = decoded.allEggRiftsEnabled
-                    end
-                    if decoded.riftSelections and type(decoded.riftSelections) == "table" then
-                        for name, enabled in pairs(decoded.riftSelections) do
-                            if riftSelections[name] ~= nil then
-                                riftSelections[name] = enabled
-                            end
-                        end
-                    end
-                    addStatusLog("✓ Settings loaded")
-                end
-            end
-        end
-    end)
-end
-
-local function saveSettings()
-    if not writefile or not HttpService then return end
-    
-    pcall(function()
-        local settings = {
-            riftDetectionEnabled = riftDetectionEnabled,
-            allEggRiftsEnabled = allEggRiftsEnabled,
-            riftSelections = riftSelections
-        }
-        local encoded = HttpService:JSONEncode(settings)
-        writefile(Config.SETTINGS_FILE, encoded)
-    end)
 end
 
 -- Get rift position
@@ -226,14 +819,50 @@ local function teleportToPosition(position)
     return true
 end
 
+-- Add message to rift status log
+local function addRiftStatusLog(message)
+    table.insert(riftStatusLog, os.date("%H:%M:%S") .. " - " .. message)
+    if #riftStatusLog > maxRiftLogEntries then
+        table.remove(riftStatusLog, 1)
+    end
+    print("[RIFT] " .. message)
+end
+
+-- Send rift webhook notification
+local function sendRiftWebhook(message, shouldPing)
+    if not webhookURL or webhookURL == "" then
+        return
+    end
+    
+    -- shouldPing parameter determines if we should ping (only when teleporting TO rift, not when returning)
+    -- But only ping if riftPingEnabled toggle is ON
+    local mention = (shouldPing and riftPingEnabled and discordUserID ~= "") and ("<@" .. discordUserID .. ">") or ""
+    
+    table.insert(webhookQueue, {
+        content = mention ~= "" and mention or nil,
+        embeds = {{
+            title = "🎯 Rift Teleportation",
+            description = message,
+            color = 5763719, -- Green color
+            timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+        }}
+    })
+    
+    processWebhookQueue()
+end
+
 -- Return to stored position
 local function returnToStoredPosition()
     if not storedPosition then return end
     
-    addStatusLog("🔙 Returning to previous position...")
+    addRiftStatusLog("🔙 Returning to previous position...")
     
     if teleportToPosition(storedPosition) then
-        addStatusLog("✓ Returned to previous location")
+        addRiftStatusLog("✓ Returned to previous location")
+        
+        -- Send webhook notification (no ping)
+        local playerName = p.Name or "Unknown Player"
+        sendRiftWebhook(playerName .. " has successfully teleported back from the rift.", false)
         
         -- Reset state
         isAtRift = false
@@ -248,7 +877,6 @@ end
 -- Handle rift spawn
 local function handleRiftSpawn(rift)
     if isAtRift then
-        -- Try to get multiplier for the ignored rift name if it's an egg
         local ignoredRiftName = rift.Name
         pcall(function()
             if rift:GetAttribute("Type") == "Egg" then
@@ -258,7 +886,7 @@ local function handleRiftSpawn(rift)
                 end
             end
         end)
-        addStatusLog("⚠ Already at a rift, ignoring: " .. ignoredRiftName)
+        addRiftStatusLog("⚠ Already at a rift, ignoring: " .. ignoredRiftName)
         return
     end
     
@@ -271,17 +899,12 @@ local function handleRiftSpawn(rift)
     local isSelected = false
     local displayName = rift.Name
     local matchedRiftInfo = nil
-    local riftTypeAttr = nil
-    pcall(function()
-        riftTypeAttr = rift:GetAttribute("Type")
-    end)
     
     -- 1) Exact specific rifts (2026 egg, peppermint chest)
     for _, riftInfo in ipairs(Config.RIFTS) do
         local searchName = string.lower(riftInfo.name)
         local searchDisplay = string.lower(riftInfo.displayName)
         
-        -- Check various name patterns
         if string.find(riftName, searchName) or 
            string.find(riftName, searchDisplay) or
            string.find(searchName, riftName) or
@@ -303,7 +926,6 @@ local function handleRiftSpawn(rift)
             local simplifiedEgg = eggName:lower():gsub("%s+", ""):gsub("%-", "")
             if string.find(simplifiedName, simplifiedEgg, 1, true) or string.find(simplifiedEgg, simplifiedName, 1, true) then
                 isSelected = true
-                -- Format display name nicely (replace dash with space and capitalize)
                 displayName = eggName:gsub("%-", " "):gsub("^%l", string.upper)
                 matchedRiftInfo = { name = eggName, displayName = eggName, type = "Egg" }
                 break
@@ -312,10 +934,10 @@ local function handleRiftSpawn(rift)
     end
     
     if not isSelected then
-        return -- Rift not selected, ignore
+        return
     end
     
-    -- Ignore if we already know about this rift (existed when script started)
+    -- Ignore if we already know about this rift
     if knownRifts[rift] then
         return
     end
@@ -323,7 +945,6 @@ local function handleRiftSpawn(rift)
     -- Get rift position
     local riftPos = getRiftPosition(rift)
     if not riftPos then
-        -- Try to format error message with multiplier if it's an egg
         local errorRiftName = rift.Name
         pcall(function()
             if matchedRiftInfo and matchedRiftInfo.type == "Egg" then
@@ -333,7 +954,7 @@ local function handleRiftSpawn(rift)
                 end
             end
         end)
-        addStatusLog("✗ Could not determine position for: " .. errorRiftName)
+        addRiftStatusLog("✗ Could not determine position for: " .. errorRiftName)
         return
     end
     
@@ -342,7 +963,7 @@ local function handleRiftSpawn(rift)
     if char and char:FindFirstChild("HumanoidRootPart") then
         storedPosition = char.HumanoidRootPart.Position
     else
-        addStatusLog("✗ Could not store current position")
+        addRiftStatusLog("✗ Could not store current position")
         return
     end
     
@@ -353,26 +974,23 @@ local function handleRiftSpawn(rift)
             local serverTime = workspace:GetServerTimeNow()
             riftDuration = math.max(0, despawnAt - serverTime)
         else
-            riftDuration = 600 -- Default 10 minutes
+            riftDuration = 600
         end
         
-        -- Get luck multiplier for egg rifts
         if matchedRiftInfo and matchedRiftInfo.type == "Egg" then
             luckMultiplier = getRiftBonusLuck(rift)
         end
     end)
     
-    -- Format display name with multiplier prefix for egg rifts
+    -- Format display name with multiplier
     local displayNameWithMultiplier = displayName
     if matchedRiftInfo and matchedRiftInfo.type == "Egg" and luckMultiplier then
         displayNameWithMultiplier = formatEggNameWithMultiplier(displayName, luckMultiplier)
     end
     
-    -- Display duration + 1 second in logs (but wait for actual duration)
     local displayedDuration = riftDuration + 1
-    
-    addStatusLog("🎯 Rift detected: " .. displayNameWithMultiplier)
-    addStatusLog("   Duration: " .. math.floor(displayedDuration / 60) .. "m " .. math.floor(displayedDuration % 60) .. "s")
+    addRiftStatusLog("🎯 Rift detected: " .. displayNameWithMultiplier)
+    addRiftStatusLog("   Duration: " .. math.floor(displayedDuration / 60) .. "m " .. math.floor(displayedDuration % 60) .. "s")
     
     -- Set state
     currentRift = rift
@@ -380,22 +998,27 @@ local function handleRiftSpawn(rift)
     riftStartTime = tick()
     
     -- Teleport to rift
-    local teleportPos = riftPos + Vector3.new(0, Config.HEIGHT_OFFSET, 0)
+    local teleportPos = riftPos + Vector3.new(0, Config.RIFT_HEIGHT_OFFSET, 0)
     if teleportToPosition(teleportPos) then
-        addStatusLog("⚡ Teleported to " .. displayNameWithMultiplier)
+        addRiftStatusLog("⚡ Teleported to " .. displayNameWithMultiplier)
         
-        -- Monitor duration (wait for actual duration, not displayed duration)
+        -- Send webhook notification
+        local playerName = p.Name or "Unknown Player"
+        local webhookMessage = playerName .. " teleported to a " .. displayNameWithMultiplier .. " rift"
+        webhookMessage = webhookMessage .. "\n**Duration:** " .. math.floor(riftDuration / 60) .. "m " .. math.floor(riftDuration % 60) .. "s"
+        sendRiftWebhook(webhookMessage, true) -- Ping enabled based on riftPingEnabled toggle
+        
+        -- Monitor duration
         spawn(function()
             task.wait(riftDuration)
             
             if isAtRift and currentRift == rift then
-                addStatusLog("⏰ Rift duration expired")
+                addRiftStatusLog("⏰ Rift duration expired")
                 returnToStoredPosition()
             end
         end)
     else
-        addStatusLog("✗ Failed to teleport to rift")
-        -- Reset state on failure
+        addRiftStatusLog("✗ Failed to teleport to rift")
         isAtRift = false
         currentRift = nil
         storedPosition = nil
@@ -409,22 +1032,21 @@ local function setupRiftMonitoring()
     local function monitorFolder(folder, folderPath)
         if monitoredFolders[folder] then return end
         
-        addStatusLog("✓ Monitoring: " .. folderPath)
+        addRiftStatusLog("✓ Monitoring: " .. folderPath)
         monitoredFolders[folder] = true
         
-        -- Mark existing rifts as known (don't teleport to them)
+        -- Mark existing rifts as known
         for _, rift in ipairs(folder:GetChildren()) do
             knownRifts[rift] = true
         end
         
         -- Monitor for new rifts only
         folder.ChildAdded:Connect(function(rift)
-            task.wait(0.5) -- Wait for rift to fully load
+            task.wait(0.5)
             handleRiftSpawn(rift)
         end)
     end
     
-    -- Try to find Rifts folder
     pcall(function()
         if workspace:FindFirstChild("Rendered") then
             local rendered = workspace.Rendered
@@ -453,175 +1075,1728 @@ local function setupRiftMonitoring()
     end)
 end
 
--- Create GUI
-local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "RiftAutoFlyGUI_V2"
-screenGui.ResetOnSpawn = false
-screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
-screenGui.DisplayOrder = 99
-screenGui.Parent = p.PlayerGui
+-- Process webhook queue
+local function processWebhookQueue()
+    if isSendingWebhook or #webhookQueue == 0 or not scriptActive then
+        return
+    end
+    
+    isSendingWebhook = true
+    
+    spawn(function()
+        while #webhookQueue > 0 and scriptActive do
+            local webhookData = table.remove(webhookQueue, 1)
+            
+            -- Check message type
+            if webhookData.isCustomEmbed then
+                -- Custom embed (like admin abuse summary)
+                local maxRetries = 5
+                local retryCount = 0
+                local success = false
+                
+                while retryCount < maxRetries and not success do
+                    local jsonPayload = jsonEncode(webhookData.payload)
+                    local ok, response, status = httpLib(webhookURL, "POST", {
+                        ["Content-Type"] = "application/json"
+                    }, jsonPayload)
+                    
+                    success = ok and (status == 200 or status == 204)
+                    
+                    if not success and status == 429 then
+                        retryCount = retryCount + 1
+                        if retryCount < maxRetries then
+                            task.wait(1)
+                        end
+                    else
+                        break
+                    end
+                end
+                
+                if not success then
+                    table.insert(webhookQueue, 1, webhookData)
+                    messagesRemainingWithDelay = 5
+                end
+            elseif webhookData.isPlainText then
+                -- Plain text message
+                local maxRetries = 5
+                local retryCount = 0
+                local success = false
+                
+                while retryCount < maxRetries and not success do
+                    success = sendPlainTextWebhook(webhookData.message, webhookData.shouldPing or false)
+                    
+                    if not success then
+                        retryCount = retryCount + 1
+                        if retryCount < maxRetries then
+                            task.wait(1)
+                        end
+                    end
+                end
+                
+                if not success then
+                    table.insert(webhookQueue, 1, webhookData)
+                    messagesRemainingWithDelay = 5
+                end
+            elseif webhookData.isDebug and webhookData.debugMessage then
+                -- Debug webhook
+                local maxRetries = 5
+                local retryCount = 0
+                local success = false
+                
+                while retryCount < maxRetries and not success do
+                    success = sendDebugWebhook(webhookData.debugMessage)
+                    
+                    if not success then
+                        retryCount = retryCount + 1
+                        if retryCount < maxRetries then
+                            task.wait(1)
+                        end
+                    end
+                end
+                
+                if not success then
+                    table.insert(webhookQueue, 1, webhookData)
+                    messagesRemainingWithDelay = 5
+                end
+            else
+                -- Regular or special notification
+                local petName = webhookData.petName
+                local shiny = webhookData.shiny
+                local mythic = webhookData.mythic
+                local xl = webhookData.xl
+                local eggName = webhookData.eggName
+                local rarity = webhookData.rarity
+                local pet = webhookData.pet
+                -- OPTIMIZED: Fetch thumbnail URL lazily here (or use cached/pre-fetched URL)
+                local petImageUrl = webhookData.petImageUrl
+                if not petImageUrl and webhookData.petImageAssetId then
+                    petImageUrl = getThumbnailUrl(webhookData.petImageAssetId)
+                end
+                local isSpecial = webhookData.isSpecial == true
+                local isInfinity = webhookData.isInfinity == true
+                local notificationType = webhookData.notificationType
+                local shouldPing = webhookData.shouldPing or false
+                
+                local maxRetries = 5
+                local retryCount = 0
+                local success = false
+                
+                while retryCount < maxRetries and not success do
+                    local notifType = isSpecial and "infinity" or (notificationType or "secret")
+                    success = sendPetNotificationWebhook(petName, shiny, mythic, xl, eggName, rarity, pet, petImageUrl, notifType, shouldPing)
+                    
+                    if not success then
+                        retryCount = retryCount + 1
+                        if retryCount < maxRetries then
+                            task.wait(1)
+                        end
+                    end
+                end
+                
+                if not success then
+                    table.insert(webhookQueue, 1, webhookData)
+                    messagesRemainingWithDelay = 5
+                end
+            end
+            
+            -- Determine delay based on rate limit counter
+            local delay = (messagesRemainingWithDelay > 0) and 2 or 1
+            if messagesRemainingWithDelay > 0 then
+                messagesRemainingWithDelay = messagesRemainingWithDelay - 1
+            end
+            
+            -- Wait before sending next message in queue
+            if #webhookQueue > 0 then
+                task.wait(delay)
+            end
+        end
+        
+        isSendingWebhook = false
+    end)
+end
 
--- Main frame
-local mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.new(0, 320, 0, 400)
-mainFrame.Position = UDim2.new(0.5, -160, 0.5, -200)
-mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-mainFrame.BorderSizePixel = 2
-mainFrame.BorderColor3 = Color3.fromRGB(50, 200, 50)
-mainFrame.Active = true
-mainFrame.Draggable = true
-mainFrame.Parent = screenGui
+-- Public function to queue webhook (handles rate limiting)
+-- OPTIMIZED: No longer blocks on thumbnail URL fetching
+local function sendDiscordNotification(petName, shiny, mythic, xl, eggName, rarity, pet)
+    -- Don't process if script is closed
+    if not scriptActive then
+        return
+    end
+    
+    if webhookURL == "" then
+        print("✗ Webhook URL not set")
+        return
+    end
+    
+    if not httpLib then
+        print("✗ HTTP library not available")
+        return
+    end
+    
+    -- Get pet image asset ID (non-blocking, no HTTP call)
+    local petImageAssetId = getPetImageAssetId(petName, shiny, mythic, xl)
+    
+    -- This function now just queues the notification with specified type and ping status
+    -- The calling code (connectToEvents) determines notificationType and shouldPing
+    
+    -- NOTE: This function signature is now extended to accept notificationType and shouldPing
+    -- But we're being called from the old signature, so we need to handle that
+    -- For backward compatibility, we'll use the old logic if notificationType is not passed
+    
+    -- Check if this is a special pet
+    local isSpecial = isSpecialPet(petName)
+    local isInfinity = isInfinityRarity(rarity)
+    
+    -- If special pet, send special notification and debug message
+    if isSpecial then
+        -- Add special notification to queue
+        table.insert(webhookQueue, {
+            petName = petName,
+            shiny = shiny,
+            mythic = mythic,
+            xl = xl,
+            eggName = eggName,
+            rarity = rarity,
+            pet = pet,
+            petImageAssetId = petImageAssetId, -- Store asset ID, fetch URL later
+            isSpecial = true,
+            isInfinity = isInfinity
+        })
+        
+        -- Add debug message to queue (separate message, no ping)
+        local debugMessage = isInfinity and 
+            "The rarity of this pet is specified as Infinity" or 
+            ("The rarity is not infinity. Rarity: " .. (rarity or "Unknown"))
+        table.insert(webhookQueue, {
+            debugMessage = debugMessage,
+            isDebug = true
+        })
+    else
+        -- Add regular notification to queue
+        table.insert(webhookQueue, {
+            petName = petName,
+            shiny = shiny,
+            mythic = mythic,
+            xl = xl,
+            eggName = eggName,
+            rarity = rarity,
+            pet = pet,
+            petImageAssetId = petImageAssetId, -- Store asset ID, fetch URL later
+            isSpecial = false
+        })
+    end
+    
+    -- Start processing queue if not already processing
+    processWebhookQueue()
+end
 
-local corner = Instance.new("UICorner")
-corner.CornerRadius = UDim.new(0, 8)
-corner.Parent = mainFrame
+-- Helper function to get pet image asset ID (optimized, non-blocking)
+local function getPetImageAssetId(petName, shiny, mythic, xl)
+    if not PetsData or not petName then
+        return nil
+    end
+    
+    local success, petData = pcall(function()
+        return PetsData[petName]
+    end)
+    
+    if not success or not petData or not petData.Images then
+        return nil
+    end
+    
+    -- Determine image type based on shiny/mythic/xl status
+    local imageType = "Normal"
+    if shiny and mythic and xl then
+        imageType = "MythicShinyXL"
+    elseif shiny and mythic then
+        imageType = "MythicShiny"
+    elseif mythic and xl then
+        imageType = "MythicXL"
+    elseif shiny and xl then
+        imageType = "ShinyXL"
+    elseif shiny then
+        imageType = "Shiny"
+    elseif mythic then
+        imageType = "Mythic"
+    elseif xl then
+        imageType = "XL"
+    end
+    
+    -- Get the image asset ID with cascading fallbacks
+    local petImageAsset = petData.Images[imageType]
+    
+    -- If exact combination not found, try simpler versions
+    if not petImageAsset then
+        if shiny and mythic then
+            petImageAsset = petData.Images["MythicShiny"]
+        elseif shiny then
+            petImageAsset = petData.Images["Shiny"]
+        elseif mythic then
+            petImageAsset = petData.Images["Mythic"]
+        end
+    end
+    
+    -- Final fallback to Normal
+    petImageAsset = petImageAsset or petData.Images["Normal"]
+    
+    if petImageAsset then
+        -- Extract asset ID from rbxassetid:// format
+        return petImageAsset:match("rbxassetid://(%d+)")
+    end
+    
+    return nil
+end
 
--- Title bar
-local titleBar = Instance.new("Frame")
-titleBar.Size = UDim2.new(1, 0, 0, 32)
-titleBar.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
-titleBar.BorderSizePixel = 0
-titleBar.Parent = mainFrame
+-- NEW: Unified function to send pet notifications with explicit notification type and ping control
+-- OPTIMIZED: No longer blocks on thumbnail URL fetching - done lazily in queue processor
+local function sendPetNotification(petName, shiny, mythic, xl, eggName, rarity, pet, notificationType, shouldPing)
+    -- Don't process if script is closed
+    if not scriptActive then
+        return
+    end
+    
+    if webhookURL == "" then
+        print("✗ Webhook URL not set")
+        return
+    end
+    
+    if not httpLib then
+        print("✗ HTTP library not available")
+        return
+    end
+    
+    -- Get pet image asset ID (non-blocking, no HTTP call)
+    local petImageAssetId = getPetImageAssetId(petName, shiny, mythic, xl)
+    
+    -- Determine which notification to send based on notificationType
+    if notificationType == "infinity" then
+        -- Special infinity notification
+        local isInfinity = isInfinityRarity(rarity)
+        
+        table.insert(webhookQueue, {
+            petName = petName,
+            shiny = shiny,
+            mythic = mythic,
+            xl = xl,
+            eggName = eggName,
+            rarity = rarity,
+            pet = pet,
+            petImageAssetId = petImageAssetId, -- Store asset ID, fetch URL later
+            isSpecial = true,
+            isInfinity = isInfinity,
+            shouldPing = shouldPing
+        })
+        
+        -- Add debug message
+        local debugMessage = isInfinity and 
+            "The rarity of this pet is specified as Infinity" or 
+            ("The rarity is not infinity. Rarity: " .. (rarity or "Unknown"))
+        table.insert(webhookQueue, {
+            debugMessage = debugMessage,
+            isDebug = true
+        })
+    elseif notificationType == "secret" then
+        -- Regular secret notification
+        table.insert(webhookQueue, {
+            petName = petName,
+            shiny = shiny,
+            mythic = mythic,
+            xl = xl,
+            eggName = eggName,
+            rarity = rarity,
+            pet = pet,
+            petImageAssetId = petImageAssetId, -- Store asset ID, fetch URL later
+            isSpecial = false,
+            notificationType = "secret",
+            shouldPing = shouldPing
+        })
+    elseif notificationType == "xl" then
+        -- XL notification (simple format)
+        table.insert(webhookQueue, {
+            petName = petName,
+            shiny = shiny,
+            mythic = mythic,
+            xl = xl,
+            petImageAssetId = petImageAssetId, -- Store asset ID, fetch URL later
+            notificationType = "xl",
+            shouldPing = shouldPing
+        })
+    elseif notificationType == "legendary" then
+        -- Legendary notification (simple format)
+        table.insert(webhookQueue, {
+            petName = petName,
+            shiny = shiny,
+            mythic = mythic,
+            xl = xl,
+            petImageAssetId = petImageAssetId, -- Store asset ID, fetch URL later
+            notificationType = "legendary",
+            shouldPing = shouldPing
+        })
+    end
+    
+    -- Start processing queue if not already processing
+    processWebhookQueue()
+end
 
-local titleCorner = Instance.new("UICorner")
-titleCorner.CornerRadius = UDim.new(0, 6)
-titleCorner.Parent = titleBar
+-- Helper function to calculate pet rarity number for sorting
+local function getPetRarityValue(pet)
+    if not PetUtil or not pet then
+        return 0
+    end
+    
+    local success, petChance = pcall(function()
+        return PetUtil:GetChance(pet)
+    end)
+    
+    if success and petChance and petChance > 0 then
+        return math.ceil(100 / petChance)
+    end
+    
+    return 0
+end
 
-local titleBottomFix = Instance.new("Frame")
-titleBottomFix.Size = UDim2.new(1, 0, 0, 6)
-titleBottomFix.Position = UDim2.new(0, 0, 1, -6)
-titleBottomFix.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
-titleBottomFix.BorderSizePixel = 0
-titleBottomFix.Parent = titleBar
+-- Helper function to get variant hierarchy value
+local function getVariantHierarchy(shiny, mythic, xl)
+    if shiny and mythic and xl then return 8 end -- Shiny Mythic XL
+    if mythic and xl then return 7 end -- Mythic XL
+    if shiny and xl then return 6 end -- Shiny XL
+    if xl then return 5 end -- XL
+    if shiny and mythic then return 4 end -- Shiny Mythic
+    if mythic then return 3 end -- Mythic
+    if shiny then return 2 end -- Shiny
+    return 1 -- Normal
+end
 
-local titleText = Instance.new("TextLabel")
-titleText.Size = UDim2.new(1, -16, 1, 0)
-titleText.Position = UDim2.new(0, 8, 0, 0)
-titleText.BackgroundTransparency = 1
-titleText.Text = "🎄 RIFT HUNTER"
-titleText.TextColor3 = Color3.fromRGB(255, 255, 255)
-titleText.TextSize = 14
-titleText.Font = Enum.Font.GothamBold
-titleText.TextXAlignment = Enum.TextXAlignment.Left
-titleText.Parent = titleBar
+-- Helper function to get variant name
+local function getVariantName(shiny, mythic, xl)
+    local name = ""
+    if shiny and mythic then
+        name = "Shiny Mythic "
+    elseif shiny then
+        name = "Shiny "
+    elseif mythic then
+        name = "Mythic "
+    end
+    if xl then
+        name = name .. "XL "
+    end
+    return name
+end
 
-local contentFrame = Instance.new("Frame")
-contentFrame.Size = UDim2.new(1, -16, 1, -80)
-contentFrame.Position = UDim2.new(0, 8, 0, 38)
-contentFrame.BackgroundTransparency = 1
-contentFrame.Parent = mainFrame
+-- Admin Abuse Summary function
+local function sendAdminAbuseSummary()
+    if #adminAbuseHatchedPets == 0 then
+        -- No pets hatched during admin abuse
+        table.insert(webhookQueue, {
+            message = "Admin Abuse mode ended. No secrets or infinities were hatched.",
+            isPlainText = true,
+            shouldPing = false
+        })
+        processWebhookQueue()
+        
+        -- Reset tracking variables
+        adminAbuseStartTime = nil
+        adminAbuseStartEggCount = nil
+        return
+    end
+    
+    -- Get player name
+    local playerName = p.Name or "Unknown Player"
+    
+    -- Calculate eggs hatched during admin abuse
+    local currentEggCount = getTotalEggsHatched()
+    local eggsHatchedDuringAbuse = 0
+    if adminAbuseStartEggCount and currentEggCount then
+        eggsHatchedDuringAbuse = currentEggCount - adminAbuseStartEggCount
+    end
+    
+    -- Calculate time elapsed
+    local timeElapsed = 0
+    if adminAbuseStartTime then
+        timeElapsed = os.time() - adminAbuseStartTime
+    end
+    
+    -- Sort pets by hierarchy and rarity
+    table.sort(adminAbuseHatchedPets, function(a, b)
+        -- First sort by infinity (infinities first)
+        if a.isInfinity and not b.isInfinity then return true end
+        if not a.isInfinity and b.isInfinity then return false end
+        
+        -- Then sort by variant hierarchy
+        local aHierarchy = getVariantHierarchy(a.shiny, a.mythic, a.xl)
+        local bHierarchy = getVariantHierarchy(b.shiny, b.mythic, b.xl)
+        if aHierarchy ~= bHierarchy then
+            return aHierarchy > bHierarchy
+        end
+        
+        -- Then sort by rarity (higher rarity first)
+        local aRarity = getPetRarityValue(a.pet)
+        local bRarity = getPetRarityValue(b.pet)
+        return aRarity > bRarity
+    end)
+    
+    -- Count pets by name and variant
+    local petCounts = {}
+    for _, petData in ipairs(adminAbuseHatchedPets) do
+        local variantName = getVariantName(petData.shiny, petData.mythic, petData.xl)
+        local fullName = variantName .. petData.name
+        
+        if not petCounts[fullName] then
+            petCounts[fullName] = {
+                count = 0,
+                rarity = getPetRarityValue(petData.pet),
+                hierarchy = getVariantHierarchy(petData.shiny, petData.mythic, petData.xl),
+                isInfinity = petData.isInfinity,
+                shiny = petData.shiny,
+                mythic = petData.mythic,
+                xl = petData.xl,
+                name = petData.name
+            }
+        end
+        petCounts[fullName].count = petCounts[fullName].count + 1
+    end
+    
+    -- Build list of pets
+    local petList = {}
+    for fullName, data in pairs(petCounts) do
+        table.insert(petList, {
+            name = fullName,
+            count = data.count,
+            rarity = data.rarity,
+            hierarchy = data.hierarchy,
+            isInfinity = data.isInfinity,
+            shiny = data.shiny,
+            mythic = data.mythic,
+            xl = data.xl,
+            baseName = data.name
+        })
+    end
+    
+    -- Sort the list
+    table.sort(petList, function(a, b)
+        if a.isInfinity and not b.isInfinity then return true end
+        if not a.isInfinity and b.isInfinity then return false end
+        if a.hierarchy ~= b.hierarchy then return a.hierarchy > b.hierarchy end
+        return a.rarity > b.rarity
+    end)
+    
+    -- Build description with pet list
+    local description = ""
+    for _, data in ipairs(petList) do
+        description = description .. data.count .. "x " .. data.name .. "\n"
+    end
+    
+    -- Add spacing before stats
+    description = description .. "\n"
+    
+    -- Add eggs hatched during abuse
+    if eggsHatchedDuringAbuse > 0 then
+        local formattedEggs = eggsHatchedDuringAbuse
+        if FormatCommas then
+            formattedEggs = FormatCommas(eggsHatchedDuringAbuse)
+        else
+            formattedEggs = tostring(eggsHatchedDuringAbuse):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
+        end
+        description = description .. "**Eggs Hatched:** " .. formattedEggs .. "\n"
+    end
+    
+    -- Calculate and add eggs per secret
+    local totalSecrets = #adminAbuseHatchedPets
+    if eggsHatchedDuringAbuse > 0 and totalSecrets > 0 then
+        local eggsPerSecret = math.floor(eggsHatchedDuringAbuse / totalSecrets)
+        local formattedRate = eggsPerSecret
+        if FormatCommas then
+            formattedRate = FormatCommas(eggsPerSecret)
+        else
+            formattedRate = tostring(eggsPerSecret):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
+        end
+        description = description .. "**1 secret per " .. formattedRate .. " eggs**\n"
+    end
+    
+    -- Calculate and add time per secret
+    if timeElapsed > 0 and totalSecrets > 0 then
+        local secondsPerSecret = timeElapsed / totalSecrets
+        local timeStr = ""
+        
+        if secondsPerSecret >= 60 then
+            local minutes = math.floor(secondsPerSecret / 60)
+            local seconds = math.floor(secondsPerSecret % 60)
+            if minutes > 0 and seconds > 0 then
+                timeStr = string.format("%dm %ds", minutes, seconds)
+            elseif minutes > 0 then
+                timeStr = string.format("%dm", minutes)
+            else
+                timeStr = string.format("%ds", seconds)
+            end
+        else
+            timeStr = string.format("%ds", math.floor(secondsPerSecret))
+        end
+        
+        description = description .. "**1 secret per " .. timeStr .. "**"
+    end
+    
+    -- Determine embed color (rarest pet's color)
+    local rarestPet = petList[1]
+    local embedColor = getEmbedColor(rarestPet.shiny, rarestPet.mythic, rarestPet.xl, rarestPet.isInfinity)
+    
+    -- Build embed with party popper emoji
+    local embed = {
+        title = "🎉 " .. playerName .. "'s Admin Abuse Summary! 🎉",
+        description = description,
+        color = embedColor,
+        footer = {
+            text = "Total: " .. totalSecrets .. " secrets/infinities"
+        },
+        timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+    }
+    
+    local payload = {
+        embeds = {embed}
+    }
+    
+    -- Send to webhook queue
+    table.insert(webhookQueue, {
+        isCustomEmbed = true,
+        payload = payload
+    })
+    processWebhookQueue()
+    
+    -- Clear the tracking table and reset variables
+    adminAbuseHatchedPets = {}
+    adminAbuseStartTime = nil
+    adminAbuseStartEggCount = nil
+end
 
--- Toggle button (full width)
+-- Connect to HatchEgg event
+local function connectToEvents()
+    if not Remote then
+        print("✗ Remote module not loaded!")
+        return false
+    end
+    
+    if not ItemUtil then
+        print("✗ ItemUtil not loaded!")
+        return false
+    end
+    
+    local success, err = pcall(function()
+        hatchEventConnection = Remote.Event("HatchEgg"):Connect(function(hatchedTable)
+            -- Wrap entire handler in pcall to prevent errors from breaking the connection
+            pcall(function()
+                -- Don't process if script is closed
+                if not scriptActive then
+                    return
+                end
+                
+                if type(hatchedTable) == "table" and hatchedTable.Pets then
+                    local eggName = hatchedTable.Name
+                    
+                    for i = 1, 20 do
+                        local petData = hatchedTable.Pets[i]
+                        if not petData then break end
+                        
+                        if type(petData) == "table" and petData.Pet then
+                            local pet = petData.Pet
+                            local petName = pet.Name
+                            local shiny = pet.Shiny == true
+                            local mythic = pet.Mythic == true
+                            
+                            -- XL detection with multiple fallback methods (optimized for most common case first)
+                            local xl = (pet.XL == true) -- Check uppercase XL (most likely case)
+                                or (pet.xl == true) -- Check lowercase xl
+                                or (pet.Xl == true) -- Check mixed case Xl
+                                or (type(pet.XL) == "number" and pet.XL > 0) -- Check if XL is a number value
+                                or (petName and string.find(string.upper(petName), "XL", 1, true) ~= nil) -- Check if "XL" is in the pet name (optimized search)
+                            
+                            -- Only process if detection is enabled and pet data is available
+                            if petName and ItemUtil then
+                                local rarity = ItemUtil:GetRarity(pet)
+                                
+                                -- Check pet characteristics
+                                local isSpecial = isSpecialPet(petName)
+                                local isSecret = rarity == "Secret"
+                                local isLegendary = rarity == "Legendary"
+                                
+                                -- Determine which settings to use (admin abuse or normal)
+                                local activeSettings = {}
+                                if adminAbuseActive then
+                                    activeSettings.notifyNormal = adminAbuseSecretSettings.notifyNormal
+                                    activeSettings.notifyShiny = adminAbuseSecretSettings.notifyShiny
+                                    activeSettings.notifyMythic = adminAbuseSecretSettings.notifyMythic
+                                    activeSettings.notifyShinyMythic = adminAbuseSecretSettings.notifyShinyMythic
+                                    activeSettings.notifyXL = adminAbuseSecretSettings.notifyXL
+                                    activeSettings.pingNormal = adminAbuseSecretSettings.pingNormal
+                                    activeSettings.pingShiny = adminAbuseSecretSettings.pingShiny
+                                    activeSettings.pingMythic = adminAbuseSecretSettings.pingMythic
+                                    activeSettings.pingShinyMythic = adminAbuseSecretSettings.pingShinyMythic
+                                    activeSettings.pingXL = adminAbuseSecretSettings.pingXL
+                                    activeSettings.filterUnder1B = adminAbuseSecretSettings.filterUnder1B
+                                    activeSettings.infinityNotify = adminAbuseSecretSettings.notifyInfinity or true
+                                    activeSettings.infinityPing = adminAbuseSecretSettings.pingInfinity or true
+                                else
+                                    activeSettings.notifyNormal = secretNotifyNormal
+                                    activeSettings.notifyShiny = secretNotifyShiny
+                                    activeSettings.notifyMythic = secretNotifyMythic
+                                    activeSettings.notifyShinyMythic = secretNotifyShinyMythic
+                                    activeSettings.notifyXL = secretNotifyXL
+                                    activeSettings.pingNormal = secretPingNormal
+                                    activeSettings.pingShiny = secretPingShiny
+                                    activeSettings.pingMythic = secretPingMythic
+                                    activeSettings.pingShinyMythic = secretPingShinyMythic
+                                    activeSettings.pingXL = secretPingXL
+                                    activeSettings.filterUnder1B = secretFilterUnder1B
+                                    activeSettings.infinityNotify = infinityNotifyEnabled
+                                    activeSettings.infinityPing = infinityPingEnabled
+                                end
+                                
+                                -- ===== DETECTION LOGIC =====
+                                
+                                -- Priority 1: Infinity pets
+                                if isSpecial then
+                                    if activeSettings.infinityNotify then
+                                        local shouldPing = activeSettings.infinityPing
+                                        
+                                        -- Track for admin abuse summary
+                                        if adminAbuseActive then
+                                            table.insert(adminAbuseHatchedPets, {
+                                                name = petName,
+                                                shiny = shiny,
+                                                mythic = mythic,
+                                                xl = xl,
+                                                rarity = rarity,
+                                                isInfinity = true,
+                                                pet = pet
+                                            })
+                                        end
+                                        
+                                        
+                                        sendPetNotification(petName, shiny, mythic, xl, eggName, rarity, pet, "infinity", shouldPing)
+                                        print(">>> INFINITY PET DETECTED! <<<")
+                                    end
+                                
+                                -- Priority 2: Secret pets (cascading variant logic)
+                                elseif isSecret then
+                                    local shouldNotify = false
+                                    local shouldPing = false
+                                    
+                                    -- DEBUG: Log secret detection
+                                    print("🔍 SECRET DETECTED - Analyzing...")
+                                    print("   Pet: " .. tostring(petName))
+                                    print("   Shiny: " .. tostring(shiny))
+                                    print("   Mythic: " .. tostring(mythic))
+                                    print("   XL: " .. tostring(xl))
+                                    print("   Settings - notifyNormal: " .. tostring(activeSettings.notifyNormal))
+                                    print("   Settings - notifyShiny: " .. tostring(activeSettings.notifyShiny))
+                                    print("   Settings - notifyMythic: " .. tostring(activeSettings.notifyMythic))
+                                    print("   Settings - filterUnder1B: " .. tostring(activeSettings.filterUnder1B))
+                                    
+                                    -- Cascading detection logic
+                                    -- Check exact match first, then cascade
+                                    if shiny and mythic and xl then
+                                        -- Shiny Mythic XL: can be triggered by any of: Shiny, Mythic, Shiny Mythic, XL
+                                        shouldNotify = activeSettings.notifyShiny or activeSettings.notifyMythic or activeSettings.notifyShinyMythic or activeSettings.notifyXL
+                                        if activeSettings.pingShiny or activeSettings.pingMythic or activeSettings.pingShinyMythic or activeSettings.pingXL then
+                                            shouldPing = true
+                                        end
+                                    elseif mythic and xl then
+                                        -- Mythic XL: can be triggered by Mythic or XL
+                                        shouldNotify = activeSettings.notifyMythic or activeSettings.notifyXL
+                                        if activeSettings.pingMythic or activeSettings.pingXL then
+                                            shouldPing = true
+                                        end
+                                    elseif shiny and xl then
+                                        -- Shiny XL: can be triggered by Shiny or XL
+                                        shouldNotify = activeSettings.notifyShiny or activeSettings.notifyXL
+                                        if activeSettings.pingShiny or activeSettings.pingXL then
+                                            shouldPing = true
+                                        end
+                                    elseif shiny and mythic then
+                                        -- Shiny Mythic: can be triggered by Shiny, Mythic, or Shiny Mythic
+                                        shouldNotify = activeSettings.notifyShiny or activeSettings.notifyMythic or activeSettings.notifyShinyMythic
+                                        if activeSettings.pingShiny or activeSettings.pingMythic or activeSettings.pingShinyMythic then
+                                            shouldPing = true
+                                        end
+                                    elseif xl then
+                                        -- XL: triggered by XL
+                                        shouldNotify = activeSettings.notifyXL
+                                        shouldPing = activeSettings.pingXL
+                                    elseif mythic then
+                                        -- Mythic: triggered by Mythic
+                                        shouldNotify = activeSettings.notifyMythic
+                                        shouldPing = activeSettings.pingMythic
+                                    elseif shiny then
+                                        -- Shiny: triggered by Shiny
+                                        shouldNotify = activeSettings.notifyShiny
+                                        shouldPing = activeSettings.pingShiny
+                                        print("   → Detected as: Shiny Secret")
+                                    else
+                                        -- Normal: triggered by Normal
+                                        shouldNotify = activeSettings.notifyNormal
+                                        shouldPing = activeSettings.pingNormal
+                                        print("   → Detected as: Normal Secret")
+                                    end
+                                    
+                                    print("   shouldNotify (before filter): " .. tostring(shouldNotify))
+                                    print("   shouldPing: " .. tostring(shouldPing))
+                                    
+                                    -- Apply <1B filter
+                                    print("   Checking filter...")
+                                    if shouldNotify and activeSettings.filterUnder1B then
+                                        print("   → Filter is ON, checking rarity...")
+                                        -- Check if pet is under 1B
+                                        if PetUtil and pet then
+                                            local success, petChance = pcall(function()
+                                                return PetUtil:GetChance(pet)
+                                            end)
+                                            if success and petChance and petChance > 0 then
+                                                local denominator = math.ceil(100 / petChance)
+                                                -- If under 1B, check if any variant is enabled that overrides the filter
+                                                if denominator < 1000000000 then
+                                                    local hasEnabledVariant = false
+                                                    
+                                                    -- Check if pet has any variant that is enabled for notifications
+                                                    -- Must check both: pet HAS the variant AND setting is enabled
+                                                    if xl and activeSettings.notifyXL then
+                                                        hasEnabledVariant = true
+                                                    elseif (shiny and mythic) and activeSettings.notifyShinyMythic then
+                                                        hasEnabledVariant = true
+                                                    elseif mythic and activeSettings.notifyMythic then
+                                                        hasEnabledVariant = true
+                                                    elseif shiny and activeSettings.notifyShiny then
+                                                        hasEnabledVariant = true
+                                                    elseif (not shiny and not mythic and not xl) and activeSettings.notifyNormal then
+                                                        -- Normal pet (no variants) with Normal enabled
+                                                        hasEnabledVariant = true
+                                                    end
+                                                    
+                                                    -- If no enabled variant, skip notification
+                                                    if not hasEnabledVariant then
+                                                        shouldNotify = false
+                                                        print("   → Filter BLOCKED (no enabled variant for <1B)")
+                                                    else
+                                                        print("   → Filter PASSED (has enabled variant)")
+                                                    end
+                                                else
+                                                    print("   → Rarity is ≥1B, filter passed")
+                                                end
+                                            end
+                                        end
+                                    else
+                                        print("   → Filter is OFF or shouldNotify is false, skipping filter")
+                                    end
+                                    
+                                    -- Track for admin abuse summary (always track, even if not notifying)
+                                    if adminAbuseActive then
+                                        table.insert(adminAbuseHatchedPets, {
+                                            name = petName,
+                                            shiny = shiny,
+                                            mythic = mythic,
+                                            xl = xl,
+                                            rarity = rarity,
+                                            isInfinity = false,
+                                            pet = pet
+                                        })
+                                    end
+                                    
+                                    
+                                    print("   FINAL shouldNotify: " .. tostring(shouldNotify))
+                                    print("   FINAL shouldPing: " .. tostring(shouldPing))
+                                    
+                                    if shouldNotify then
+                                        print("   ✅ SENDING NOTIFICATION...")
+                                        sendPetNotification(petName, shiny, mythic, xl, eggName, rarity, pet, "secret", shouldPing)
+                                        print(">>> SECRET DETECTED! <<<")
+                                    else
+                                        print("   ❌ NOTIFICATION BLOCKED (shouldNotify = false)")
+                                    end
+                                
+                                -- Priority 3: XL pets (non-secret)
+                                -- Priority 4: Legendary pets (non-XL, non-secret) - ping by default if enabled
+                                elseif isLegendary and legendaryDetectionEnabled then
+                                    local shouldPing = legendaryDetectionEnabled -- Ping by default if enabled
+                                    sendPetNotification(petName, shiny, mythic, xl, eggName, rarity, pet, "legendary", shouldPing)
+                                    print(">>> LEGENDARY DETECTED! <<<")
+                                end
+                            end
+                        end
+                    end
+                end
+            end)
+        end)
+    end)
+    
+    if success then
+        print("✓ Connected to HatchEgg events")
+        return true
+    else
+        print("✗ Failed to connect: " .. tostring(err))
+        return false
+    end
+end
+
+
+-- Egg count monitoring system (checks every 10 minutes at :X0)
+local lastEggCount = nil
+local lastHourlyEggCount = nil -- Eggs at last hourly notification
+local firstCheckTime = nil -- Time of first check
+local lastHourNotified = nil -- Which hour we last sent a message for (0-23)
+local hasStoppedHatching = false -- Track if we've already sent "stopped hatching" message
+local hourlyEggHistory = {} -- Track egg counts: {timestamp = count}
+local hoursCountedSinceLastNotif = 0 -- Track how many hours since last notification
+local function startEggCountMonitoring()
+    spawn(function()
+        while scriptActive do
+            -- Only run if enabled and webhook is configured
+            if eggCountMonitoringEnabled and webhookURL ~= "" then
+                -- Calculate time until next :X0 minute
+                local currentTime = os.date("*t")
+                local currentMinute = currentTime.min
+                local currentSecond = currentTime.sec
+                
+                -- Calculate minutes until next :X0 (0, 10, 20, 30, 40, 50)
+                local minutesUntilNextCheck = 10 - (currentMinute % 10)
+                
+                -- Handle edge case: if we're exactly at :X0, wait 10 minutes
+                if minutesUntilNextCheck == 10 and currentSecond == 0 then
+                    minutesUntilNextCheck = 10
+                elseif minutesUntilNextCheck == 10 then
+                    minutesUntilNextCheck = 0
+                end
+                
+                -- Calculate total seconds until next check
+                local secondsUntilNextCheck = (minutesUntilNextCheck * 60) - currentSecond
+                
+                -- Ensure we always wait at least 1 second to prevent instant loops
+                if secondsUntilNextCheck <= 0 then
+                    secondsUntilNextCheck = 600 -- Wait 10 minutes if calculation fails
+                end
+                
+                -- Wait until next check time (max 10 minutes)
+                task.wait(math.min(secondsUntilNextCheck, 600))
+                
+                -- Double-check if still enabled after waiting
+                if not eggCountMonitoringEnabled or webhookURL == "" or not scriptActive then
+                    task.wait(60) -- Wait before checking again
+                    continue
+                end
+                
+                -- Get current egg count
+                local currentEggCount = getTotalEggsHatched()
+                
+                if currentEggCount == nil then
+                    -- Failed to get egg count - treat as not hatching
+                    if lastEggCount ~= nil and not hasStoppedHatching then
+                        table.insert(webhookQueue, {
+                            message = string.format("%s is no longer hatching.", p.Name),
+                            isPlainText = true,
+                            shouldPing = false
+                        })
+                        processWebhookQueue()
+                        hasStoppedHatching = true
+                    end
+                    lastEggCount = nil
+                    lastHourlyEggCount = nil
+                    firstCheckTime = nil
+                elseif lastEggCount == nil then
+                    -- First check - record baseline
+                    lastEggCount = currentEggCount
+                    lastHourlyEggCount = currentEggCount
+                    firstCheckTime = os.time()
+                    hasStoppedHatching = false
+                elseif currentEggCount > lastEggCount then
+                    -- Eggs increased - player is still hatching
+                    lastEggCount = currentEggCount
+                    hasStoppedHatching = false -- Reset flag since they're hatching again
+                    
+                    -- Check if we're at the top of the hour (:00) and should send message based on interval
+                    local currentTime = os.date("*t")
+                    if currentTime.min == 0 and lastHourlyEggCount ~= nil then
+                        local currentHour = currentTime.hour
+                        
+                        -- Only process if we haven't processed this hour yet
+                        if lastHourNotified ~= currentHour then
+                            -- Store current egg count in history with timestamp key
+                            local hourTimestamp = math.floor(os.time() / 3600) -- Hours since epoch
+                            hourlyEggHistory[hourTimestamp] = currentEggCount
+                            
+                            -- Clean old entries (keep last 150 hours = ~6 days)
+                            for timestamp, _ in pairs(hourlyEggHistory) do
+                                if hourTimestamp - timestamp > 150 then
+                                    hourlyEggHistory[timestamp] = nil
+                                end
+                            end
+                            
+                            -- Increment hour counter
+                            hoursCountedSinceLastNotif = hoursCountedSinceLastNotif + 1
+                            
+                            -- Check if we should send a notification based on interval
+                            if hoursCountedSinceLastNotif >= eggMonitorIntervalHours then
+                                -- Calculate eggs hatched since last notification
+                                local eggsInPeriod = currentEggCount - lastHourlyEggCount
+                                
+                                -- Calculate actual time in period
+                                local timeInPeriod = eggMonitorIntervalHours * 60 -- minutes
+                                if lastHourNotified == nil and firstCheckTime ~= nil then
+                                    -- First notification - calculate actual elapsed time
+                                    timeInPeriod = math.floor((os.time() - firstCheckTime) / 60)
+                                end
+                                
+                                -- Format numbers
+                                local formattedTotal = currentEggCount
+                                local formattedPeriod = eggsInPeriod
+                                if FormatCommas then
+                                    formattedTotal = FormatCommas(currentEggCount)
+                                    formattedPeriod = FormatCommas(eggsInPeriod)
+                                else
+                                    formattedTotal = tostring(currentEggCount):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
+                                    formattedPeriod = tostring(eggsInPeriod):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
+                                end
+                                
+                                -- Build base message with appropriate time unit
+                                local timeUnit = timeInPeriod >= 60 and "hours" or "minutes"
+                                local timeValue = timeInPeriod >= 60 and (timeInPeriod / 60) or timeInPeriod
+                                
+                                local message = string.format(
+                                    "%s is still hatching.\nTotal Hatched: %s\nEggs hatched in the last %d %s: %s",
+                                    p.Name,
+                                    formattedTotal,
+                                    timeValue,
+                                    timeUnit,
+                                    formattedPeriod
+                                )
+                                
+                                -- Add rolling totals for every 12 hours if we have enough data
+                                -- Skip if the user's interval is 12h to avoid duplicate
+                                local currentHourTimestamp = math.floor(os.time() / 3600)
+                                for multipleOf12 = 12, 120, 12 do -- Up to 120 hours (5 days)
+                                    -- Skip this interval if it matches user's setting (avoid duplicate)
+                                    if eggMonitorIntervalHours ~= multipleOf12 then
+                                        -- Look for egg count from X hours ago
+                                        local timestampXHoursAgo = currentHourTimestamp - multipleOf12
+                                        local eggCountXHoursAgo = hourlyEggHistory[timestampXHoursAgo]
+                                        
+                                        if eggCountXHoursAgo then
+                                            local eggsInLastXHours = currentEggCount - eggCountXHoursAgo
+                                            local formattedXHours = eggsInLastXHours
+                                            if FormatCommas then
+                                                formattedXHours = FormatCommas(eggsInLastXHours)
+                                            else
+                                                formattedXHours = tostring(eggsInLastXHours):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
+                                            end
+                                            message = message .. string.format("\nEggs hatched in the last %d hours: %s", multipleOf12, formattedXHours)
+                                        end
+                                    end
+                                end
+                                
+                                table.insert(webhookQueue, {
+                                    message = message,
+                                    isPlainText = true,
+                                    shouldPing = false
+                                })
+                                processWebhookQueue()
+                                
+                                -- Reset counter and update tracking
+                                hoursCountedSinceLastNotif = 0
+                                lastHourlyEggCount = currentEggCount
+                            end
+                            
+                            -- Always update lastHourNotified to prevent reprocessing same hour
+                            lastHourNotified = currentHour
+                        end
+                    end
+                else
+                    -- Eggs did not increase - player is no longer hatching
+                    if not hasStoppedHatching then
+                        table.insert(webhookQueue, {
+                            message = string.format("%s is no longer hatching.", p.Name),
+                            isPlainText = true,
+                            shouldPing = false
+                        })
+                        processWebhookQueue()
+                        hasStoppedHatching = true
+                    end
+                    lastEggCount = currentEggCount -- Update count
+                end
+            else
+                -- Not enabled or no webhook - check every minute
+                task.wait(60)
+            end
+        end
+    end)
+end
+
+-- Player join/leave tracking
+local function setupPlayerTracking()
+    P.PlayerAdded:Connect(function(player)
+        if not scriptActive or not playerTrackingEnabled or webhookURL == "" then return end
+        
+        table.insert(webhookQueue, {
+            message = string.format("%s joined the server", player.Name),
+            isPlainText = true,
+            shouldPing = false
+        })
+        processWebhookQueue()
+    end)
+    
+    P.PlayerRemoving:Connect(function(player)
+        if not scriptActive or not playerTrackingEnabled or webhookURL == "" then return end
+        
+        table.insert(webhookQueue, {
+            message = string.format("%s left the server", player.Name),
+            isPlainText = true,
+            shouldPing = false
+        })
+        processWebhookQueue()
+    end)
+    
+    print("✓ Player tracking setup complete")
+end
+
+-- Connect after modules load
+task.wait(1)
+connectToEvents()
+setupPlayerTracking()
+startEggCountMonitoring()
+setupRiftMonitoring()
+
+-- GUI with tab system
+local g = Instance.new("ScreenGui")
+g.Name = "BubblegumAutoHatch"
+g.ResetOnSpawn = false
+g.ZIndexBehavior = Enum.ZIndexBehavior.Global
+g.DisplayOrder = 100
+g.Parent = p.PlayerGui
+
+-- Main frame (slightly wider for tab system, compact height)
+local f = Instance.new("Frame")
+f.Size = UDim2.new(0, 450, 0, 340)
+f.Position = UDim2.new(0.5, -225, 0.5, -170)
+f.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+f.BorderSizePixel = 0
+f.Parent = g
+
+-- Add rounded corners to main frame
+local fCorner = Instance.new("UICorner")
+fCorner.CornerRadius = UDim.new(0, 8)
+fCorner.Parent = f
+
+-- Tab container (left side)
+local tabContainer = Instance.new("Frame")
+tabContainer.Size = UDim2.new(0, 90, 1, 0)
+tabContainer.Position = UDim2.new(0, 0, 0, 0)
+tabContainer.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+tabContainer.BorderSizePixel = 0
+tabContainer.Parent = f
+
+-- Content container (right side)
+local contentContainer = Instance.new("Frame")
+contentContainer.Size = UDim2.new(0, 360, 1, 0)
+contentContainer.Position = UDim2.new(0, 90, 0, 0)
+contentContainer.BackgroundTransparency = 1
+contentContainer.BorderSizePixel = 0
+contentContainer.Parent = f
+
+-- Hatching tab button
+local hatchingTab = Instance.new("TextButton")
+hatchingTab.Size = UDim2.new(1, 0, 0, 50)
+hatchingTab.Position = UDim2.new(0, 0, 0, 0)
+hatchingTab.BackgroundColor3 = Color3.fromRGB(60, 120, 200)
+hatchingTab.Text = "Hatching"
+hatchingTab.TextColor3 = Color3.fromRGB(255, 255, 255)
+hatchingTab.TextSize = 14
+hatchingTab.Font = Enum.Font.GothamBold
+hatchingTab.BorderSizePixel = 0
+hatchingTab.Parent = tabContainer
+
+-- Pet Detection tab button (new)
+local detectionTab = Instance.new("TextButton")
+detectionTab.Size = UDim2.new(1, 0, 0, 50)
+detectionTab.Position = UDim2.new(0, 0, 0, 50)
+detectionTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+detectionTab.Text = "Pet Detection"
+detectionTab.TextColor3 = Color3.fromRGB(255, 255, 255)
+detectionTab.TextSize = 12
+detectionTab.Font = Enum.Font.GothamBold
+detectionTab.BorderSizePixel = 0
+detectionTab.Parent = tabContainer
+
+-- Extra tab button
+local extraTab = Instance.new("TextButton")
+extraTab.Size = UDim2.new(1, 0, 0, 50)
+extraTab.Position = UDim2.new(0, 0, 0, 100)
+extraTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+extraTab.Text = "Extra"
+extraTab.TextColor3 = Color3.fromRGB(255, 255, 255)
+extraTab.TextSize = 14
+extraTab.Font = Enum.Font.GothamBold
+extraTab.BorderSizePixel = 0
+extraTab.Parent = tabContainer
+
+-- Rifts tab button
+local riftsTab = Instance.new("TextButton")
+riftsTab.Size = UDim2.new(1, 0, 0, 50)
+riftsTab.Position = UDim2.new(0, 0, 0, 150)
+riftsTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+riftsTab.Text = "Rifts"
+riftsTab.TextColor3 = Color3.fromRGB(255, 255, 255)
+riftsTab.TextSize = 14
+riftsTab.Font = Enum.Font.GothamBold
+riftsTab.BorderSizePixel = 0
+riftsTab.Parent = tabContainer
+
+-- Hatching content frame
+local hatchingContent = Instance.new("Frame")
+hatchingContent.Size = UDim2.new(1, 0, 1, 0)
+hatchingContent.BackgroundTransparency = 1
+hatchingContent.Visible = true
+hatchingContent.Parent = contentContainer
+
+-- Pet Detection content frame (new)
+local detectionContent = Instance.new("Frame")
+detectionContent.Size = UDim2.new(1, 0, 1, 0)
+detectionContent.BackgroundTransparency = 1
+detectionContent.Visible = false
+detectionContent.Parent = contentContainer
+
+-- Extra content frame
+local extraContent = Instance.new("Frame")
+extraContent.Size = UDim2.new(1, 0, 1, 0)
+extraContent.BackgroundTransparency = 1
+extraContent.Visible = false
+extraContent.Parent = contentContainer
+
+-- Rifts content frame
+local riftsContent = Instance.new("Frame")
+riftsContent.Size = UDim2.new(1, 0, 1, 0)
+riftsContent.BackgroundTransparency = 1
+riftsContent.Visible = false
+riftsContent.Parent = contentContainer
+
+-- Secret Detection Settings sub-menu frame (overlay)
+local secretSettingsMenu = Instance.new("Frame")
+secretSettingsMenu.Size = UDim2.new(1, 0, 1, 0)
+secretSettingsMenu.BackgroundTransparency = 1
+secretSettingsMenu.Visible = false
+secretSettingsMenu.ZIndex = 5
+secretSettingsMenu.Parent = contentContainer
+
+-- Add rounded corners to secret settings menu background (will be added in createSecretSettingsMenu)
+
+-- Admin Abuse Secret Settings sub-menu frame (overlay)
+local adminSecretSettingsMenu = Instance.new("Frame")
+adminSecretSettingsMenu.Size = UDim2.new(1, 0, 1, 0)
+adminSecretSettingsMenu.BackgroundTransparency = 1
+adminSecretSettingsMenu.Visible = false
+adminSecretSettingsMenu.ZIndex = 5
+adminSecretSettingsMenu.Parent = contentContainer
+
+-- ==================== PET DETECTION TAB CONTENT ====================
+
+-- Detection title
+local detectionTitle = Instance.new("TextLabel")
+detectionTitle.Size = UDim2.new(1, 0, 0, 40)
+detectionTitle.Position = UDim2.new(0, 0, 0, 0)
+detectionTitle.BackgroundColor3 = Color3.fromRGB(60, 120, 200)
+detectionTitle.Text = "Pet Detection Settings"
+detectionTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+detectionTitle.TextSize = 16
+detectionTitle.Font = Enum.Font.GothamBold
+detectionTitle.BorderSizePixel = 0
+detectionTitle.Parent = detectionContent
+
+-- Row 1: Secret Detection Settings button (full width) - smaller
+local secretSettingsBtn = Instance.new("TextButton")
+secretSettingsBtn.Size = UDim2.new(0, 330, 0, 38)
+secretSettingsBtn.Position = UDim2.new(0, 15, 0, 50)
+secretSettingsBtn.BackgroundColor3 = Color3.fromRGB(100, 150, 255)
+secretSettingsBtn.Text = "⚙ Secret Detection Settings"
+secretSettingsBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+secretSettingsBtn.TextSize = 13
+secretSettingsBtn.Font = Enum.Font.GothamBold
+secretSettingsBtn.BorderSizePixel = 0
+secretSettingsBtn.Parent = detectionContent
+
+local secretSettingsDesc = Instance.new("TextLabel")
+secretSettingsDesc.Size = UDim2.new(0, 330, 0, 22)
+secretSettingsDesc.Position = UDim2.new(0, 15, 0, 100)
+secretSettingsDesc.BackgroundTransparency = 1
+secretSettingsDesc.Text = "Configure granular secret detection and ping settings"
+secretSettingsDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
+secretSettingsDesc.TextSize = 9
+secretSettingsDesc.Font = Enum.Font.Gotham
+secretSettingsDesc.TextXAlignment = Enum.TextXAlignment.Center
+secretSettingsDesc.TextYAlignment = Enum.TextYAlignment.Top
+secretSettingsDesc.TextWrapped = true
+secretSettingsDesc.Parent = detectionContent
+
+-- Admin Abuse toggle button (moved from Admin Abuse tab)
+local adminAbuseToggleBtn = Instance.new("TextButton")
+adminAbuseToggleBtn.Size = UDim2.new(0, 330, 0, 38)
+adminAbuseToggleBtn.Position = UDim2.new(0, 15, 0, 130)
+adminAbuseToggleBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+adminAbuseToggleBtn.Text = "Admin Abuse Mode: OFF"
+adminAbuseToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+adminAbuseToggleBtn.TextSize = 13
+adminAbuseToggleBtn.Font = Enum.Font.GothamBold
+adminAbuseToggleBtn.BorderSizePixel = 0
+adminAbuseToggleBtn.Parent = detectionContent
+
+local adminAbuseToggleDesc = Instance.new("TextLabel")
+adminAbuseToggleDesc.Size = UDim2.new(0, 330, 0, 20)
+adminAbuseToggleDesc.Position = UDim2.new(0, 15, 0, 172)
+adminAbuseToggleDesc.BackgroundTransparency = 1
+adminAbuseToggleDesc.Text = "Use separate detection settings for admin abuse events"
+adminAbuseToggleDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
+adminAbuseToggleDesc.TextSize = 9
+adminAbuseToggleDesc.Font = Enum.Font.Gotham
+adminAbuseToggleDesc.TextXAlignment = Enum.TextXAlignment.Center
+adminAbuseToggleDesc.TextYAlignment = Enum.TextYAlignment.Top
+adminAbuseToggleDesc.TextWrapped = true
+adminAbuseToggleDesc.Parent = detectionContent
+
+-- Admin Abuse settings button (moved from Admin Abuse tab)
+local adminAbuseSettingsBtn = Instance.new("TextButton")
+adminAbuseSettingsBtn.Size = UDim2.new(0, 330, 0, 38)
+adminAbuseSettingsBtn.Position = UDim2.new(0, 15, 0, 200)
+adminAbuseSettingsBtn.BackgroundColor3 = Color3.fromRGB(100, 150, 255)
+adminAbuseSettingsBtn.Text = "⚙ Configure Admin Abuse Settings"
+adminAbuseSettingsBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+adminAbuseSettingsBtn.TextSize = 13
+adminAbuseSettingsBtn.Font = Enum.Font.GothamBold
+adminAbuseSettingsBtn.BorderSizePixel = 0
+adminAbuseSettingsBtn.Parent = detectionContent
+
+-- Tab switching helper function
+local function switchTab(activeContent, activeTab)
+    hatchingContent.Visible = (activeContent == hatchingContent)
+    detectionContent.Visible = (activeContent == detectionContent)
+    extraContent.Visible = (activeContent == extraContent)
+    riftsContent.Visible = (activeContent == riftsContent)
+    secretSettingsMenu.Visible = false
+    adminSecretSettingsMenu.Visible = false
+    hatchingTab.BackgroundColor3 = (activeTab == hatchingTab) and Color3.fromRGB(60, 120, 200) or Color3.fromRGB(40, 40, 40)
+    detectionTab.BackgroundColor3 = (activeTab == detectionTab) and Color3.fromRGB(60, 120, 200) or Color3.fromRGB(40, 40, 40)
+    extraTab.BackgroundColor3 = (activeTab == extraTab) and Color3.fromRGB(60, 120, 200) or Color3.fromRGB(40, 40, 40)
+    riftsTab.BackgroundColor3 = (activeTab == riftsTab) and Color3.fromRGB(60, 120, 200) or Color3.fromRGB(40, 40, 40)
+end
+
+-- ==================== HATCHING TAB CONTENT ====================
+
+-- Title bar (in hatching content)
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0, 40)
+title.Position = UDim2.new(0, 0, 0, 0)
+title.BackgroundColor3 = Color3.fromRGB(60, 120, 200)
+title.Text = "Auto Hatch & Notifier"
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.TextSize = 16
+title.Font = Enum.Font.GothamBold
+title.BorderSizePixel = 0
+title.Parent = hatchingContent
+
+-- Auto Hatch button
+local autoHatchBtn = Instance.new("TextButton")
+autoHatchBtn.Size = UDim2.new(0, 330, 0, 45)
+autoHatchBtn.Position = UDim2.new(0, 15, 0, 55)
+autoHatchBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+autoHatchBtn.Text = "Auto Hatch: OFF"
+autoHatchBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+autoHatchBtn.TextSize = 14
+autoHatchBtn.Font = Enum.Font.GothamBold
+autoHatchBtn.BorderSizePixel = 0
+autoHatchBtn.Parent = hatchingContent
+
+-- Webhook URL label
+local webhookLabel = Instance.new("TextLabel")
+webhookLabel.Size = UDim2.new(0, 330, 0, 20)
+webhookLabel.Position = UDim2.new(0, 15, 0, 110)
+webhookLabel.BackgroundTransparency = 1
+webhookLabel.Text = "Discord Webhook URL:"
+webhookLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+webhookLabel.TextSize = 11
+webhookLabel.Font = Enum.Font.Gotham
+webhookLabel.TextXAlignment = Enum.TextXAlignment.Left
+webhookLabel.Parent = hatchingContent
+
+-- Webhook URL input
+local webhookInput = Instance.new("TextBox")
+webhookInput.Size = UDim2.new(0, 330, 0, 30)
+webhookInput.Position = UDim2.new(0, 15, 0, 130)
+webhookInput.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+webhookInput.TextColor3 = Color3.fromRGB(255, 255, 255)
+webhookInput.Text = webhookURL or ""
+webhookInput.PlaceholderText = "https://discord.com/api/webhooks/..."
+webhookInput.PlaceholderColor3 = Color3.fromRGB(150, 150, 150)
+webhookInput.TextSize = 10
+webhookInput.Font = Enum.Font.Gotham
+webhookInput.BorderSizePixel = 0
+webhookInput.TextTruncate = Enum.TextTruncate.AtEnd
+webhookInput.Parent = hatchingContent
+
+-- Discord User ID label
+local userIDLabel = Instance.new("TextLabel")
+userIDLabel.Size = UDim2.new(0, 330, 0, 20)
+userIDLabel.Position = UDim2.new(0, 15, 0, 170)
+userIDLabel.BackgroundTransparency = 1
+userIDLabel.Text = "Discord User ID (optional):"
+userIDLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+userIDLabel.TextSize = 11
+userIDLabel.Font = Enum.Font.Gotham
+userIDLabel.TextXAlignment = Enum.TextXAlignment.Left
+userIDLabel.Parent = hatchingContent
+
+-- Discord User ID input
+local userIDInput = Instance.new("TextBox")
+userIDInput.Size = UDim2.new(0, 330, 0, 30)
+userIDInput.Position = UDim2.new(0, 15, 0, 190)
+userIDInput.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+userIDInput.TextColor3 = Color3.fromRGB(255, 255, 255)
+userIDInput.Text = discordUserID or ""
+userIDInput.PlaceholderText = "123456789012345678"
+userIDInput.PlaceholderColor3 = Color3.fromRGB(150, 150, 150)
+userIDInput.TextSize = 11
+userIDInput.Font = Enum.Font.Gotham
+userIDInput.BorderSizePixel = 0
+userIDInput.Parent = hatchingContent
+
+-- X button on main GUI (top right of frame) - hides GUI
+local hideXBtn = Instance.new("TextButton")
+hideXBtn.Size = UDim2.new(0, 30, 0, 30)
+hideXBtn.Position = UDim2.new(1, -35, 0, 5)
+hideXBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+hideXBtn.Text = "X"
+hideXBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+hideXBtn.TextSize = 18
+hideXBtn.Font = Enum.Font.GothamBold
+hideXBtn.BorderSizePixel = 0
+hideXBtn.ZIndex = 10
+hideXBtn.Active = true
+hideXBtn.Parent = f
+
+-- Toggle button (top right of screen - always visible)
 local toggleBtn = Instance.new("TextButton")
-toggleBtn.Size = UDim2.new(1, 0, 0, 35)
-toggleBtn.Position = UDim2.new(0, 0, 0, 0)
-toggleBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-toggleBtn.Text = "Rift Detection: OFF"
+toggleBtn.Size = UDim2.new(0, 50, 0, 50)
+toggleBtn.Position = UDim2.new(1, -60, 0, 10)
+toggleBtn.AnchorPoint = Vector2.new(1, 0)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(60, 120, 200)
+toggleBtn.Text = "GUI"
 toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-toggleBtn.TextSize = 13
+toggleBtn.TextSize = 12
 toggleBtn.Font = Enum.Font.GothamBold
 toggleBtn.BorderSizePixel = 0
-toggleBtn.Parent = contentFrame
+toggleBtn.ZIndex = 100
+toggleBtn.Active = true
+toggleBtn.Parent = g
 
+-- Add rounded corners to toggle button
 local toggleCorner = Instance.new("UICorner")
-toggleCorner.CornerRadius = UDim.new(0, 4)
+toggleCorner.CornerRadius = UDim.new(0, 8)
 toggleCorner.Parent = toggleBtn
 
--- Rift selection buttons (side by side) + all-egg toggle
-local riftBtn1 = Instance.new("TextButton")
-riftBtn1.Size = UDim2.new(0.48, 0, 0, 30)
-riftBtn1.Position = UDim2.new(0, 0, 0, 42)
-riftBtn1.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-riftBtn1.Text = "☐ 2026 Egg"
-riftBtn1.TextColor3 = Color3.fromRGB(255, 255, 255)
-riftBtn1.TextSize = 11
-riftBtn1.Font = Enum.Font.GothamBold
-riftBtn1.BorderSizePixel = 0
-riftBtn1.Parent = contentFrame
+-- Extra content title bar
+local extraTitle = Instance.new("TextLabel")
+extraTitle.Size = UDim2.new(1, 0, 0, 40)
+extraTitle.Position = UDim2.new(0, 0, 0, 0)
+extraTitle.BackgroundColor3 = Color3.fromRGB(60, 120, 200)
+extraTitle.Text = "Extra Features"
+extraTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+extraTitle.TextSize = 16
+extraTitle.Font = Enum.Font.GothamBold
+extraTitle.BorderSizePixel = 0
+extraTitle.Parent = extraContent
 
-local riftBtn1Corner = Instance.new("UICorner")
-riftBtn1Corner.CornerRadius = UDim.new(0, 4)
-riftBtn1Corner.Parent = riftBtn1
+-- 2x2 Button grid in Extra tab
+-- Row 1: Egg Monitor (left) and Notification Interval (right)
+-- Row 2: Player Tracking (left)
+-- Row 3: Close Script button (full width at bottom)
 
-local riftBtn2 = Instance.new("TextButton")
-riftBtn2.Size = UDim2.new(0.48, 0, 0, 30)
-riftBtn2.Position = UDim2.new(0.52, 0, 0, 42)
-riftBtn2.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-riftBtn2.Text = "☐ Peppermint"
-riftBtn2.TextColor3 = Color3.fromRGB(255, 255, 255)
-riftBtn2.TextSize = 11
-riftBtn2.Font = Enum.Font.GothamBold
-riftBtn2.BorderSizePixel = 0
-riftBtn2.Parent = contentFrame
+-- Egg count monitoring button (top-left)
+local eggMonitorBtn = Instance.new("TextButton")
+eggMonitorBtn.Size = UDim2.new(0, 155, 0, 28)
+eggMonitorBtn.Position = UDim2.new(0, 15, 0, 50)
+eggMonitorBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+eggMonitorBtn.Text = "Egg Monitor: ON"
+eggMonitorBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+eggMonitorBtn.TextSize = 11
+eggMonitorBtn.Font = Enum.Font.GothamBold
+eggMonitorBtn.BorderSizePixel = 0
+eggMonitorBtn.Parent = extraContent
 
-local riftBtn2Corner = Instance.new("UICorner")
-riftBtn2Corner.CornerRadius = UDim.new(0, 4)
-riftBtn2Corner.Parent = riftBtn2
+local eggMonitorDesc = Instance.new("TextLabel")
+eggMonitorDesc.Size = UDim2.new(0, 155, 0, 22)
+eggMonitorDesc.Position = UDim2.new(0, 15, 0, 82)
+eggMonitorDesc.BackgroundTransparency = 1
+eggMonitorDesc.Text = "Monitors egg count every 10min"
+eggMonitorDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
+eggMonitorDesc.TextSize = 8
+eggMonitorDesc.Font = Enum.Font.Gotham
+eggMonitorDesc.TextXAlignment = Enum.TextXAlignment.Left
+eggMonitorDesc.TextYAlignment = Enum.TextYAlignment.Top
+eggMonitorDesc.TextWrapped = true
+eggMonitorDesc.Parent = extraContent
 
-local allEggsBtn = Instance.new("TextButton")
-allEggsBtn.Size = UDim2.new(1, 0, 0, 30)
-allEggsBtn.Position = UDim2.new(0, 0, 0, 80)
-allEggsBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-allEggsBtn.Text = "All Event Egg Rifts: OFF"
-allEggsBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-allEggsBtn.TextSize = 11
-allEggsBtn.Font = Enum.Font.GothamBold
-allEggsBtn.BorderSizePixel = 0
-allEggsBtn.Parent = contentFrame
+-- Notification interval button (top-right)
+local intervalBtn = Instance.new("TextButton")
+intervalBtn.Size = UDim2.new(0, 155, 0, 28)
+intervalBtn.Position = UDim2.new(0, 180, 0, 50)
+intervalBtn.BackgroundColor3 = Color3.fromRGB(100, 150, 255)
+intervalBtn.Text = "Interval: 1 Hour"
+intervalBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+intervalBtn.TextSize = 11
+intervalBtn.Font = Enum.Font.GothamBold
+intervalBtn.BorderSizePixel = 0
+intervalBtn.Parent = extraContent
 
-local allEggsCorner = Instance.new("UICorner")
-allEggsCorner.CornerRadius = UDim.new(0, 4)
-allEggsCorner.Parent = allEggsBtn
+local intervalDesc = Instance.new("TextLabel")
+intervalDesc.Size = UDim2.new(0, 155, 0, 22)
+intervalDesc.Position = UDim2.new(0, 180, 0, 82)
+intervalDesc.BackgroundTransparency = 1
+intervalDesc.Text = "1h / 2h / 3h / 4h / 6h / 12h"
+intervalDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
+intervalDesc.TextSize = 8
+intervalDesc.Font = Enum.Font.Gotham
+intervalDesc.TextXAlignment = Enum.TextXAlignment.Left
+intervalDesc.TextYAlignment = Enum.TextYAlignment.Top
+intervalDesc.TextWrapped = true
+intervalDesc.Parent = extraContent
+
+-- Legendary Detection button (middle-left, moved from Detection tab)
+local legendaryBtn = Instance.new("TextButton")
+legendaryBtn.Size = UDim2.new(0, 155, 0, 28)
+legendaryBtn.Position = UDim2.new(0, 15, 0, 110)
+legendaryBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+legendaryBtn.Text = "Legendary Detection: OFF"
+legendaryBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+legendaryBtn.TextSize = 10
+legendaryBtn.Font = Enum.Font.GothamBold
+legendaryBtn.BorderSizePixel = 0
+legendaryBtn.Parent = extraContent
+
+local legendaryDesc = Instance.new("TextLabel")
+legendaryDesc.Size = UDim2.new(0, 155, 0, 22)
+legendaryDesc.Position = UDim2.new(0, 15, 0, 142)
+legendaryDesc.BackgroundTransparency = 1
+legendaryDesc.Text = "Toggle legendary detection (pings by default)"
+legendaryDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
+legendaryDesc.TextSize = 8
+legendaryDesc.Font = Enum.Font.Gotham
+legendaryDesc.TextXAlignment = Enum.TextXAlignment.Left
+legendaryDesc.TextYAlignment = Enum.TextYAlignment.Top
+legendaryDesc.TextWrapped = true
+legendaryDesc.Parent = extraContent
+
+-- Player tracking button (middle-right)
+local playerBtn = Instance.new("TextButton")
+playerBtn.Size = UDim2.new(0, 155, 0, 28)
+playerBtn.Position = UDim2.new(0, 180, 0, 110)
+playerBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+playerBtn.Text = "Player Track: ON"
+playerBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+playerBtn.TextSize = 11
+playerBtn.Font = Enum.Font.GothamBold
+playerBtn.BorderSizePixel = 0
+playerBtn.Parent = extraContent
+
+local playerDesc = Instance.new("TextLabel")
+playerDesc.Size = UDim2.new(0, 155, 0, 22)
+playerDesc.Position = UDim2.new(0, 180, 0, 142)
+playerDesc.BackgroundTransparency = 1
+playerDesc.Text = "Notifies when players join or leave (no ping)"
+playerDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
+playerDesc.TextSize = 8
+playerDesc.Font = Enum.Font.Gotham
+playerDesc.TextXAlignment = Enum.TextXAlignment.Left
+playerDesc.TextYAlignment = Enum.TextYAlignment.Top
+playerDesc.TextWrapped = true
+playerDesc.Parent = extraContent
+
+-- Close Script button (bottom, full width)
+local closeScriptBtn = Instance.new("TextButton")
+closeScriptBtn.Size = UDim2.new(0, 320, 0, 35)
+closeScriptBtn.Position = UDim2.new(0, 15, 0, 170)
+closeScriptBtn.BackgroundColor3 = Color3.fromRGB(80, 40, 40)
+closeScriptBtn.Text = "Close Script"
+closeScriptBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeScriptBtn.TextSize = 13
+closeScriptBtn.Font = Enum.Font.GothamBold
+closeScriptBtn.BorderSizePixel = 0
+closeScriptBtn.Parent = extraContent
+
+local closeScriptDesc = Instance.new("TextLabel")
+closeScriptDesc.Size = UDim2.new(0, 320, 0, 18)
+closeScriptDesc.Position = UDim2.new(0, 15, 0, 210)
+closeScriptDesc.BackgroundTransparency = 1
+closeScriptDesc.Text = "Stop all script functionality"
+closeScriptDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
+closeScriptDesc.TextSize = 8
+closeScriptDesc.Font = Enum.Font.Gotham
+closeScriptDesc.TextXAlignment = Enum.TextXAlignment.Center
+closeScriptDesc.TextYAlignment = Enum.TextYAlignment.Top
+closeScriptDesc.TextWrapped = true
+closeScriptDesc.Parent = extraContent
+
+-- Version label (bottom of extra tab)
+local versionLabel = Instance.new("TextLabel")
+versionLabel.Size = UDim2.new(0, 330, 0, 16)
+versionLabel.Position = UDim2.new(0, 15, 1, -18)
+versionLabel.BackgroundTransparency = 1
+versionLabel.Text = "Version 5.0"
+versionLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+versionLabel.TextSize = 10
+versionLabel.Font = Enum.Font.Gotham
+versionLabel.TextXAlignment = Enum.TextXAlignment.Left
+versionLabel.Parent = extraContent
+
+-- ==================== RIFTS TAB CONTENT ====================
+
+-- Rifts title
+local riftsTitle = Instance.new("TextLabel")
+riftsTitle.Size = UDim2.new(1, 0, 0, 40)
+riftsTitle.Position = UDim2.new(0, 0, 0, 0)
+riftsTitle.BackgroundColor3 = Color3.fromRGB(60, 120, 200)
+riftsTitle.Text = "Rift Detection"
+riftsTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+riftsTitle.TextSize = 16
+riftsTitle.Font = Enum.Font.GothamBold
+riftsTitle.BorderSizePixel = 0
+riftsTitle.Parent = riftsContent
+
+-- Rift detection toggle button (full width)
+local riftDetectionToggleBtn = Instance.new("TextButton")
+riftDetectionToggleBtn.Size = UDim2.new(0, 330, 0, 32)
+riftDetectionToggleBtn.Position = UDim2.new(0, 15, 0, 50)
+riftDetectionToggleBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+riftDetectionToggleBtn.Text = "Rift Detection: OFF"
+riftDetectionToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+riftDetectionToggleBtn.TextSize = 13
+riftDetectionToggleBtn.Font = Enum.Font.GothamBold
+riftDetectionToggleBtn.BorderSizePixel = 0
+riftDetectionToggleBtn.Parent = riftsContent
+
+local riftDetectionCorner = Instance.new("UICorner")
+riftDetectionCorner.CornerRadius = UDim.new(0, 4)
+riftDetectionCorner.Parent = riftDetectionToggleBtn
+
+-- 2026 Egg button (left)
+local rift2026Btn = Instance.new("TextButton")
+rift2026Btn.Size = UDim2.new(0, 155, 0, 28)
+rift2026Btn.Position = UDim2.new(0, 15, 0, 90)
+rift2026Btn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+rift2026Btn.Text = "☐ 2026 Egg"
+rift2026Btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+rift2026Btn.TextSize = 11
+rift2026Btn.Font = Enum.Font.GothamBold
+rift2026Btn.BorderSizePixel = 0
+rift2026Btn.Parent = riftsContent
+
+local rift2026Corner = Instance.new("UICorner")
+rift2026Corner.CornerRadius = UDim.new(0, 4)
+rift2026Corner.Parent = rift2026Btn
+
+-- Peppermint Chest button (right)
+local riftPeppermintBtn = Instance.new("TextButton")
+riftPeppermintBtn.Size = UDim2.new(0, 155, 0, 28)
+riftPeppermintBtn.Position = UDim2.new(0, 180, 0, 90)
+riftPeppermintBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+riftPeppermintBtn.Text = "☐ Peppermint"
+riftPeppermintBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+riftPeppermintBtn.TextSize = 11
+riftPeppermintBtn.Font = Enum.Font.GothamBold
+riftPeppermintBtn.BorderSizePixel = 0
+riftPeppermintBtn.Parent = riftsContent
+
+local riftPeppermintCorner = Instance.new("UICorner")
+riftPeppermintCorner.CornerRadius = UDim.new(0, 4)
+riftPeppermintCorner.Parent = riftPeppermintBtn
+
+-- All Eggs button (full width)
+local riftAllEggsBtn = Instance.new("TextButton")
+riftAllEggsBtn.Size = UDim2.new(0, 330, 0, 28)
+riftAllEggsBtn.Position = UDim2.new(0, 15, 0, 125)
+riftAllEggsBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+riftAllEggsBtn.Text = "☐ All Eggs"
+riftAllEggsBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+riftAllEggsBtn.TextSize = 11
+riftAllEggsBtn.Font = Enum.Font.GothamBold
+riftAllEggsBtn.BorderSizePixel = 0
+riftAllEggsBtn.Parent = riftsContent
+
+local riftAllEggsCorner = Instance.new("UICorner")
+riftAllEggsCorner.CornerRadius = UDim.new(0, 4)
+riftAllEggsCorner.Parent = riftAllEggsBtn
+
+local riftAllEggsDesc = Instance.new("TextLabel")
+riftAllEggsDesc.Size = UDim2.new(0, 330, 0, 16)
+riftAllEggsDesc.Position = UDim2.new(0, 15, 0, 158)
+riftAllEggsDesc.BackgroundTransparency = 1
+riftAllEggsDesc.Text = "All event eggs and world 1 eggs"
+riftAllEggsDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
+riftAllEggsDesc.TextSize = 9
+riftAllEggsDesc.Font = Enum.Font.Gotham
+riftAllEggsDesc.TextXAlignment = Enum.TextXAlignment.Left
+riftAllEggsDesc.Parent = riftsContent
+
+-- Ping toggle button (full width)
+local riftPingToggleBtn = Instance.new("TextButton")
+riftPingToggleBtn.Size = UDim2.new(0, 330, 0, 28)
+riftPingToggleBtn.Position = UDim2.new(0, 15, 0, 180)
+riftPingToggleBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+riftPingToggleBtn.Text = "Ping on Teleport: OFF"
+riftPingToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+riftPingToggleBtn.TextSize = 11
+riftPingToggleBtn.Font = Enum.Font.GothamBold
+riftPingToggleBtn.BorderSizePixel = 0
+riftPingToggleBtn.Parent = riftsContent
+
+local riftPingToggleCorner = Instance.new("UICorner")
+riftPingToggleCorner.CornerRadius = UDim.new(0, 4)
+riftPingToggleCorner.Parent = riftPingToggleBtn
 
 -- Status display (scrollable)
-local statusFrame = Instance.new("ScrollingFrame")
-statusFrame.Size = UDim2.new(1, 0, 1, -82)
-statusFrame.Position = UDim2.new(0, 0, 0, 118)
-statusFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
-statusFrame.BorderSizePixel = 1
-statusFrame.BorderColor3 = Color3.fromRGB(50, 50, 50)
-statusFrame.ScrollBarThickness = 4
-statusFrame.Parent = contentFrame
+local riftStatusFrame = Instance.new("ScrollingFrame")
+riftStatusFrame.Size = UDim2.new(0, 330, 0, 110)
+riftStatusFrame.Position = UDim2.new(0, 15, 0, 215)
+riftStatusFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+riftStatusFrame.BorderSizePixel = 1
+riftStatusFrame.BorderColor3 = Color3.fromRGB(50, 50, 50)
+riftStatusFrame.ScrollBarThickness = 4
+riftStatusFrame.Parent = riftsContent
 
-local statusCorner = Instance.new("UICorner")
-statusCorner.CornerRadius = UDim.new(0, 4)
-statusCorner.Parent = statusFrame
+local riftStatusCorner = Instance.new("UICorner")
+riftStatusCorner.CornerRadius = UDim.new(0, 4)
+riftStatusCorner.Parent = riftStatusFrame
 
-local statusLabel = Instance.new("TextLabel")
-statusLabel.Size = UDim2.new(1, -12, 0, 20)
-statusLabel.Position = UDim2.new(0, 6, 0, 6)
-statusLabel.BackgroundTransparency = 1
-statusLabel.Text = "Waiting for rifts..."
-statusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-statusLabel.TextSize = 10
-statusLabel.Font = Enum.Font.Gotham
-statusLabel.TextXAlignment = Enum.TextXAlignment.Left
-statusLabel.TextYAlignment = Enum.TextYAlignment.Top
-statusLabel.TextWrapped = true
-statusLabel.Parent = statusFrame
+local riftStatusLabel = Instance.new("TextLabel")
+riftStatusLabel.Size = UDim2.new(1, -12, 0, 20)
+riftStatusLabel.Position = UDim2.new(0, 6, 0, 6)
+riftStatusLabel.BackgroundTransparency = 1
+riftStatusLabel.Text = "Waiting for rifts..."
+riftStatusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+riftStatusLabel.TextSize = 10
+riftStatusLabel.Font = Enum.Font.Gotham
+riftStatusLabel.TextXAlignment = Enum.TextXAlignment.Left
+riftStatusLabel.TextYAlignment = Enum.TextYAlignment.Top
+riftStatusLabel.TextWrapped = true
+riftStatusLabel.Parent = riftStatusFrame
 
--- Update status display
-local function updateStatusDisplay()
+-- Update rift status display
+local function updateRiftStatusDisplay()
     local text = ""
     
-    -- Add current status at top if at rift
     if isAtRift and currentRift then
         pcall(function()
             local despawnAt = currentRift:GetAttribute("DespawnAt")
             if despawnAt then
                 local serverTime = workspace:GetServerTimeNow()
                 local actualTimeRemaining = math.max(0, despawnAt - serverTime)
-                -- Display time remaining + 1 second
                 local displayedTimeRemaining = actualTimeRemaining + 1
                 local mins = math.floor(displayedTimeRemaining / 60)
                 local secs = math.floor(displayedTimeRemaining % 60)
                 
                 text = text .. "⏰ TIME REMAINING: " .. mins .. "m " .. secs .. "s\n"
                 
-                -- Get current rift display name with multiplier
                 local currentRiftDisplayName = currentRift.Name
                 if luckMultiplier then
-                    -- Try to match current rift to get proper display name
                     local riftNameLower = string.lower(currentRift.Name)
                     for _, riftInfo in ipairs(Config.RIFTS) do
                         local searchName = string.lower(riftInfo.name)
@@ -630,7 +2805,6 @@ local function updateStatusDisplay()
                             break
                         end
                     end
-                    -- Check event eggs too
                     if currentRiftDisplayName == currentRift.Name then
                         for _, eggName in ipairs(Config.EVENT_EGGS) do
                             local simplifiedEgg = eggName:lower():gsub("%s+", ""):gsub("%-", "")
@@ -647,7 +2821,6 @@ local function updateStatusDisplay()
                 text = text .. "🎯 Rift: " .. currentRiftDisplayName .. "\n"
                 text = text .. "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                 
-                -- Check if actual time expired (not displayed time)
                 if actualTimeRemaining <= 0 then
                     returnToStoredPosition()
                     return
@@ -656,133 +2829,1035 @@ local function updateStatusDisplay()
         end)
     end
     
-    -- Add log entries
-    if #statusLog == 0 then
+    if #riftStatusLog == 0 then
         text = text .. "Waiting for rifts..."
     else
-        for i = #statusLog, 1, -1 do -- Reverse order (newest first)
-            text = text .. statusLog[i] .. "\n"
+        for i = #riftStatusLog, 1, -1 do
+            text = text .. riftStatusLog[i] .. "\n"
         end
     end
     
-    statusLabel.Text = text
-    
-    -- Update canvas size
-    statusLabel.Size = UDim2.new(1, -12, 0, statusLabel.TextBounds.Y + 12)
-    statusFrame.CanvasSize = UDim2.new(0, 0, 0, statusLabel.TextBounds.Y + 12)
-    
-    -- Auto-scroll to top (newest status at top)
-    statusFrame.CanvasPosition = Vector2.new(0, 0)
+    riftStatusLabel.Text = text
+    riftStatusLabel.Size = UDim2.new(1, -12, 0, riftStatusLabel.TextBounds.Y + 12)
+    riftStatusFrame.CanvasSize = UDim2.new(0, 0, 0, riftStatusLabel.TextBounds.Y + 12)
+    riftStatusFrame.CanvasPosition = Vector2.new(0, 0)
 end
 
--- Update status display every second
+-- Update rift status display every second
 spawn(function()
     while scriptActive do
-        updateStatusDisplay()
+        updateRiftStatusDisplay()
         task.wait(1)
     end
 end)
 
--- Button handlers
-toggleBtn.MouseButton1Click:Connect(function()
+-- Confirmation dialog
+local confirmFrame = Instance.new("Frame")
+confirmFrame.Size = UDim2.new(0, 300, 0, 150)
+confirmFrame.Position = UDim2.new(0.5, -150, 0.5, -75)
+confirmFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+confirmFrame.BorderSizePixel = 2
+confirmFrame.BorderColor3 = Color3.fromRGB(200, 50, 50)
+confirmFrame.Visible = false
+confirmFrame.ZIndex = 20
+confirmFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+confirmFrame.Parent = g
+
+local confirmTitle = Instance.new("TextLabel")
+confirmTitle.Size = UDim2.new(1, 0, 0, 40)
+confirmTitle.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+confirmTitle.Text = "Close Script?"
+confirmTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+confirmTitle.TextSize = 16
+confirmTitle.Font = Enum.Font.GothamBold
+confirmTitle.BorderSizePixel = 0
+confirmTitle.ZIndex = 21
+confirmTitle.Parent = confirmFrame
+
+local confirmText = Instance.new("TextLabel")
+confirmText.Size = UDim2.new(0, 280, 0, 50)
+confirmText.Position = UDim2.new(0, 10, 0, 45)
+confirmText.BackgroundTransparency = 1
+confirmText.Text = "Are you sure you want to close the script?\nAll functionality will stop."
+confirmText.TextColor3 = Color3.fromRGB(255, 255, 255)
+confirmText.TextSize = 12
+confirmText.Font = Enum.Font.Gotham
+confirmText.TextWrapped = true
+confirmText.ZIndex = 21
+confirmText.Parent = confirmFrame
+
+local yesBtn = Instance.new("TextButton")
+yesBtn.Size = UDim2.new(0, 120, 0, 35)
+yesBtn.Position = UDim2.new(0, 20, 1, -50)
+yesBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+yesBtn.Text = "Yes, Close"
+yesBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+yesBtn.TextSize = 12
+yesBtn.Font = Enum.Font.GothamBold
+yesBtn.BorderSizePixel = 0
+yesBtn.ZIndex = 21
+yesBtn.Parent = confirmFrame
+
+local noBtn = Instance.new("TextButton")
+noBtn.Size = UDim2.new(0, 120, 0, 35)
+noBtn.Position = UDim2.new(1, -140, 1, -50)
+noBtn.BackgroundColor3 = Color3.fromRGB(80, 140, 80)
+noBtn.Text = "No, Cancel"
+noBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+noBtn.TextSize = 12
+noBtn.Font = Enum.Font.GothamBold
+noBtn.BorderSizePixel = 0
+noBtn.ZIndex = 21
+noBtn.Parent = confirmFrame
+
+-- ==================== SECRET DETECTION SETTINGS SUB-MENU ====================
+
+-- Helper function to create secret settings menu content (reusable for both main and admin abuse)
+local function createSecretSettingsMenu(parentFrame, isAdminAbuse)
+    -- Background
+    local bg = Instance.new("Frame")
+    bg.Size = UDim2.new(1, 0, 1, 0)
+    bg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    bg.BorderSizePixel = 0
+    bg.ZIndex = 6
+    bg.Parent = parentFrame
+    
+    -- Add rounded corners to background
+    local bgCorner = Instance.new("UICorner")
+    bgCorner.CornerRadius = UDim.new(0, 8)
+    bgCorner.Parent = bg
+    
+    -- Title
+    local menuTitle = Instance.new("TextLabel")
+    menuTitle.Size = UDim2.new(1, 0, 0, 40)
+    menuTitle.BackgroundColor3 = Color3.fromRGB(60, 120, 200)
+    menuTitle.Text = isAdminAbuse and "Admin Abuse Secret Settings" or "Secret Detection Settings"
+    menuTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+    menuTitle.TextSize = 14
+    menuTitle.Font = Enum.Font.GothamBold
+    menuTitle.BorderSizePixel = 0
+    menuTitle.ZIndex = 7
+    menuTitle.Parent = bg
+    
+    -- Back button
+    local backBtn = Instance.new("TextButton")
+    backBtn.Size = UDim2.new(0, 60, 0, 30)
+    backBtn.Position = UDim2.new(0, 5, 0, 5)
+    backBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+    backBtn.Text = "← Back"
+    backBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    backBtn.TextSize = 11
+    backBtn.Font = Enum.Font.GothamBold
+    backBtn.BorderSizePixel = 0
+    backBtn.ZIndex = 8
+    backBtn.Parent = bg
+    
+    -- Section labels
+    local notifyLabel = Instance.new("TextLabel")
+    notifyLabel.Size = UDim2.new(0, 150, 0, 20)
+    notifyLabel.Position = UDim2.new(0, 15, 0, 45)
+    notifyLabel.BackgroundTransparency = 1
+    notifyLabel.Text = "Notifications"
+    notifyLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
+    notifyLabel.TextSize = 11
+    notifyLabel.Font = Enum.Font.GothamBold
+    notifyLabel.TextXAlignment = Enum.TextXAlignment.Left
+    notifyLabel.ZIndex = 7
+    notifyLabel.Parent = bg
+    
+    local pingLabel = Instance.new("TextLabel")
+    pingLabel.Size = UDim2.new(0, 150, 0, 20)
+    pingLabel.Position = UDim2.new(0, 185, 0, 45)
+    pingLabel.BackgroundTransparency = 1
+    pingLabel.Text = "Pings"
+    pingLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
+    pingLabel.TextSize = 11
+    pingLabel.Font = Enum.Font.GothamBold
+    pingLabel.TextXAlignment = Enum.TextXAlignment.Left
+    pingLabel.ZIndex = 7
+    pingLabel.Parent = bg
+    
+    -- Storage for buttons (returned to caller)
+    local buttons = {}
+    
+    -- Create rows for: Normal, Shiny, Mythic, Shiny Mythic, XL, Infinities, <1B Filter
+    -- Reduced spacing and button sizes to fit better
+    local rows = {
+        {name = "Normal", key = "Normal", yPos = 65},
+        {name = "Shiny", key = "Shiny", yPos = 85},
+        {name = "Mythic", key = "Mythic", yPos = 105},
+        {name = "Shiny Mythic", key = "ShinyMythic", yPos = 125},
+        {name = "XL", key = "XL", yPos = 145},
+        {name = "Infinities", key = "Infinity", yPos = 165, special = true}
+    }
+    
+    for _, row in ipairs(rows) do
+        -- Notify button (left) - smaller size
+        local notifyBtn = Instance.new("TextButton")
+        notifyBtn.Size = UDim2.new(0, 140, 0, 18)
+        notifyBtn.Position = UDim2.new(0, 15, 0, row.yPos)
+        notifyBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+        notifyBtn.Text = row.name .. ": OFF"
+        notifyBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        notifyBtn.TextSize = 8
+        notifyBtn.Font = Enum.Font.GothamBold
+        notifyBtn.BorderSizePixel = 0
+        notifyBtn.ZIndex = 7
+        notifyBtn.Parent = bg
+        buttons["notify" .. row.key] = notifyBtn
+        
+        -- Ping button (right) - smaller size
+        local pingBtn = Instance.new("TextButton")
+        pingBtn.Size = UDim2.new(0, 140, 0, 18)
+        pingBtn.Position = UDim2.new(0, 175, 0, row.yPos)
+        pingBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+        pingBtn.Text = "Ping: OFF"
+        pingBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        pingBtn.TextSize = 8
+        pingBtn.Font = Enum.Font.GothamBold
+        pingBtn.BorderSizePixel = 0
+        pingBtn.ZIndex = 7
+        pingBtn.Parent = bg
+        buttons["ping" .. row.key] = pingBtn
+    end
+    
+    -- <1B Filter button (full width) - moved up
+    local filterBtn = Instance.new("TextButton")
+    filterBtn.Size = UDim2.new(0, 320, 0, 20)
+    filterBtn.Position = UDim2.new(0, 15, 0, 190)
+    filterBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    filterBtn.Text = "Filter <1B Secrets: OFF"
+    filterBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    filterBtn.TextSize = 9
+    filterBtn.Font = Enum.Font.GothamBold
+    filterBtn.BorderSizePixel = 0
+    filterBtn.ZIndex = 7
+    filterBtn.Parent = bg
+    buttons["filter"] = filterBtn
+    
+    return buttons, backBtn
+end
+
+-- Create main secret settings menu
+local mainSecretButtons, mainSecretBackBtn = createSecretSettingsMenu(secretSettingsMenu, false)
+
+-- Create admin abuse secret settings menu
+local adminSecretButtons, adminSecretBackBtn = createSecretSettingsMenu(adminSecretSettingsMenu, true)
+
+-- Tab switching helper
+local function switchTab(activeContent, activeTab)
+    hatchingContent.Visible = (activeContent == hatchingContent)
+    detectionContent.Visible = (activeContent == detectionContent)
+    extraContent.Visible = (activeContent == extraContent)
+    riftsContent.Visible = (activeContent == riftsContent)
+    secretSettingsMenu.Visible = false
+    adminSecretSettingsMenu.Visible = false
+    hatchingTab.BackgroundColor3 = (activeTab == hatchingTab) and Color3.fromRGB(60, 120, 200) or Color3.fromRGB(40, 40, 40)
+    detectionTab.BackgroundColor3 = (activeTab == detectionTab) and Color3.fromRGB(60, 120, 200) or Color3.fromRGB(40, 40, 40)
+    extraTab.BackgroundColor3 = (activeTab == extraTab) and Color3.fromRGB(60, 120, 200) or Color3.fromRGB(40, 40, 40)
+    riftsTab.BackgroundColor3 = (activeTab == riftsTab) and Color3.fromRGB(60, 120, 200) or Color3.fromRGB(40, 40, 40)
+end
+
+hatchingTab.Activated:Connect(function() switchTab(hatchingContent, hatchingTab) end)
+detectionTab.Activated:Connect(function() switchTab(detectionContent, detectionTab) end)
+extraTab.Activated:Connect(function() switchTab(extraContent, extraTab) end)
+riftsTab.Activated:Connect(function() switchTab(riftsContent, riftsTab) end)
+
+-- Auto Hatch functionality (changed to 0.4s intervals)
+autoHatchBtn.Activated:Connect(function()
+    if not scriptActive then
+        return
+    end
+    
+    autoHatchEnabled = not autoHatchEnabled
+    
+    if autoHatchEnabled then
+        autoHatchBtn.Text = "Auto Hatch: ON"
+        autoHatchBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+        
+        -- Start E key spam (0.4s intervals)
+        spawn(function()
+            while autoHatchEnabled and scriptActive do
+                VIM:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+                task.wait(0.05)
+                VIM:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+                task.wait(0.35) -- 0.05 + 0.35 = 0.4s total
+            end
+        end)
+    else
+        autoHatchBtn.Text = "Auto Hatch: OFF"
+        autoHatchBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    end
+end)
+
+
+-- Egg count monitoring toggle
+eggMonitorBtn.Activated:Connect(function()
+    if not scriptActive then return end
+    
+    eggCountMonitoringEnabled = not eggCountMonitoringEnabled
+    
+    if eggCountMonitoringEnabled then
+        eggMonitorBtn.Text = "Egg Monitor: ON"
+        eggMonitorBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+    else
+        eggMonitorBtn.Text = "Egg Monitor: OFF"
+        eggMonitorBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    end
+    
+    saveSettings()
+end)
+
+-- Notification interval toggle (cycles through 1, 2, 3, 4, 6, 12 hours)
+intervalBtn.Activated:Connect(function()
+    if not scriptActive then return end
+    
+    -- Cycle through intervals: 1 → 2 → 3 → 4 → 6 → 12 → 1
+    local intervals = {1, 2, 3, 4, 6, 12}
+    local currentIndex = 1
+    for i, v in ipairs(intervals) do
+        if v == eggMonitorIntervalHours then
+            currentIndex = i
+            break
+        end
+    end
+    
+    -- Move to next interval
+    currentIndex = currentIndex + 1
+    if currentIndex > #intervals then
+        currentIndex = 1
+    end
+    
+    eggMonitorIntervalHours = intervals[currentIndex]
+    
+    -- Update button text
+    local hourText = eggMonitorIntervalHours == 1 and "Hour" or "Hours"
+    intervalBtn.Text = string.format("Interval: %d %s", eggMonitorIntervalHours, hourText)
+    
+    -- Reset the hour counter so next notification happens after the new interval
+    hoursCountedSinceLastNotif = 0
+    
+    saveSettings()
+end)
+
+
+-- Player tracking toggle
+playerBtn.Activated:Connect(function()
+    if not scriptActive then return end
+    
+    playerTrackingEnabled = not playerTrackingEnabled
+    
+    if playerTrackingEnabled then
+        playerBtn.Text = "Player Track: ON"
+        playerBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+    else
+        playerBtn.Text = "Player Track: OFF"
+        playerBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    end
+    
+    saveSettings()
+end)
+
+-- Admin Abuse Tab Button Handlers
+
+-- Admin Abuse Settings button - opens sub-menu
+adminAbuseSettingsBtn.Activated:Connect(function()
+    if not scriptActive then return end
+    adminSecretSettingsMenu.Visible = true
+end)
+
+-- Admin Secret Settings Back button
+adminSecretBackBtn.Activated:Connect(function()
+    adminSecretSettingsMenu.Visible = false
+    saveSettings()
+end)
+
+-- Admin Secret Settings Handlers (similar to main, but updates adminAbuseSecretSettings table)
+adminSecretButtons.notifyNormal.Activated:Connect(function()
+    if not scriptActive then return end
+    adminAbuseSecretSettings.notifyNormal = not adminAbuseSecretSettings.notifyNormal
+    adminSecretButtons.notifyNormal.Text = adminAbuseSecretSettings.notifyNormal and "Normal: ON" or "Normal: OFF"
+    adminSecretButtons.notifyNormal.BackgroundColor3 = adminAbuseSecretSettings.notifyNormal and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+adminSecretButtons.notifyShiny.Activated:Connect(function()
+    if not scriptActive then return end
+    adminAbuseSecretSettings.notifyShiny = not adminAbuseSecretSettings.notifyShiny
+    adminSecretButtons.notifyShiny.Text = adminAbuseSecretSettings.notifyShiny and "Shiny: ON" or "Shiny: OFF"
+    adminSecretButtons.notifyShiny.BackgroundColor3 = adminAbuseSecretSettings.notifyShiny and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+adminSecretButtons.notifyMythic.Activated:Connect(function()
+    if not scriptActive then return end
+    adminAbuseSecretSettings.notifyMythic = not adminAbuseSecretSettings.notifyMythic
+    adminSecretButtons.notifyMythic.Text = adminAbuseSecretSettings.notifyMythic and "Mythic: ON" or "Mythic: OFF"
+    adminSecretButtons.notifyMythic.BackgroundColor3 = adminAbuseSecretSettings.notifyMythic and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+adminSecretButtons.notifyShinyMythic.Activated:Connect(function()
+    if not scriptActive then return end
+    adminAbuseSecretSettings.notifyShinyMythic = not adminAbuseSecretSettings.notifyShinyMythic
+    adminSecretButtons.notifyShinyMythic.Text = adminAbuseSecretSettings.notifyShinyMythic and "Shiny Mythic: ON" or "Shiny Mythic: OFF"
+    adminSecretButtons.notifyShinyMythic.BackgroundColor3 = adminAbuseSecretSettings.notifyShinyMythic and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+adminSecretButtons.notifyXL.Activated:Connect(function()
+    if not scriptActive then return end
+    adminAbuseSecretSettings.notifyXL = not adminAbuseSecretSettings.notifyXL
+    adminSecretButtons.notifyXL.Text = adminAbuseSecretSettings.notifyXL and "XL: ON" or "XL: OFF"
+    adminSecretButtons.notifyXL.BackgroundColor3 = adminAbuseSecretSettings.notifyXL and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+adminSecretButtons.notifyInfinity.Activated:Connect(function()
+    if not scriptActive then return end
+    local current = adminAbuseSecretSettings.notifyInfinity
+    if current == nil then current = true end
+    adminAbuseSecretSettings.notifyInfinity = not current
+    adminSecretButtons.notifyInfinity.Text = adminAbuseSecretSettings.notifyInfinity and "Infinities: ON" or "Infinities: OFF"
+    adminSecretButtons.notifyInfinity.BackgroundColor3 = adminAbuseSecretSettings.notifyInfinity and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+adminSecretButtons.pingNormal.Activated:Connect(function()
+    if not scriptActive then return end
+    adminAbuseSecretSettings.pingNormal = not adminAbuseSecretSettings.pingNormal
+    adminSecretButtons.pingNormal.Text = adminAbuseSecretSettings.pingNormal and "Ping: ON" or "Ping: OFF"
+    adminSecretButtons.pingNormal.BackgroundColor3 = adminAbuseSecretSettings.pingNormal and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+adminSecretButtons.pingShiny.Activated:Connect(function()
+    if not scriptActive then return end
+    adminAbuseSecretSettings.pingShiny = not adminAbuseSecretSettings.pingShiny
+    adminSecretButtons.pingShiny.Text = adminAbuseSecretSettings.pingShiny and "Ping: ON" or "Ping: OFF"
+    adminSecretButtons.pingShiny.BackgroundColor3 = adminAbuseSecretSettings.pingShiny and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+adminSecretButtons.pingMythic.Activated:Connect(function()
+    if not scriptActive then return end
+    adminAbuseSecretSettings.pingMythic = not adminAbuseSecretSettings.pingMythic
+    adminSecretButtons.pingMythic.Text = adminAbuseSecretSettings.pingMythic and "Ping: ON" or "Ping: OFF"
+    adminSecretButtons.pingMythic.BackgroundColor3 = adminAbuseSecretSettings.pingMythic and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+adminSecretButtons.pingShinyMythic.Activated:Connect(function()
+    if not scriptActive then return end
+    adminAbuseSecretSettings.pingShinyMythic = not adminAbuseSecretSettings.pingShinyMythic
+    adminSecretButtons.pingShinyMythic.Text = adminAbuseSecretSettings.pingShinyMythic and "Ping: ON" or "Ping: OFF"
+    adminSecretButtons.pingShinyMythic.BackgroundColor3 = adminAbuseSecretSettings.pingShinyMythic and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+adminSecretButtons.pingXL.Activated:Connect(function()
+    if not scriptActive then return end
+    adminAbuseSecretSettings.pingXL = not adminAbuseSecretSettings.pingXL
+    adminSecretButtons.pingXL.Text = adminAbuseSecretSettings.pingXL and "Ping: ON" or "Ping: OFF"
+    adminSecretButtons.pingXL.BackgroundColor3 = adminAbuseSecretSettings.pingXL and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+adminSecretButtons.pingInfinity.Activated:Connect(function()
+    if not scriptActive then return end
+    local current = adminAbuseSecretSettings.pingInfinity
+    if current == nil then current = true end
+    adminAbuseSecretSettings.pingInfinity = not current
+    adminSecretButtons.pingInfinity.Text = adminAbuseSecretSettings.pingInfinity and "Ping: ON" or "Ping: OFF"
+    adminSecretButtons.pingInfinity.BackgroundColor3 = adminAbuseSecretSettings.pingInfinity and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+adminSecretButtons.filter.Activated:Connect(function()
+    if not scriptActive then return end
+    adminAbuseSecretSettings.filterUnder1B = not adminAbuseSecretSettings.filterUnder1B
+    adminSecretButtons.filter.Text = adminAbuseSecretSettings.filterUnder1B and "Filter <1B Secrets: ON" or "Filter <1B Secrets: OFF"
+    adminSecretButtons.filter.BackgroundColor3 = adminAbuseSecretSettings.filterUnder1B and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+-- Admin Abuse Toggle button (with confirmation on deactivation)
+-- Confirmation dialog for admin abuse deactivation
+local adminAbuseConfirmFrame = Instance.new("Frame")
+adminAbuseConfirmFrame.Size = UDim2.new(0, 320, 0, 170)
+adminAbuseConfirmFrame.Position = UDim2.new(0.5, -160, 0.5, -85)
+adminAbuseConfirmFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+adminAbuseConfirmFrame.BorderSizePixel = 2
+adminAbuseConfirmFrame.BorderColor3 = Color3.fromRGB(200, 150, 50)
+adminAbuseConfirmFrame.Visible = false
+adminAbuseConfirmFrame.ZIndex = 20
+adminAbuseConfirmFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+adminAbuseConfirmFrame.Parent = g
+
+local adminAbuseConfirmTitle = Instance.new("TextLabel")
+adminAbuseConfirmTitle.Size = UDim2.new(1, 0, 0, 40)
+adminAbuseConfirmTitle.BackgroundColor3 = Color3.fromRGB(200, 150, 50)
+adminAbuseConfirmTitle.Text = "Stop Admin Abuse Mode?"
+adminAbuseConfirmTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+adminAbuseConfirmTitle.TextSize = 14
+adminAbuseConfirmTitle.Font = Enum.Font.GothamBold
+adminAbuseConfirmTitle.BorderSizePixel = 0
+adminAbuseConfirmTitle.ZIndex = 21
+adminAbuseConfirmTitle.Parent = adminAbuseConfirmFrame
+
+local adminAbuseConfirmText = Instance.new("TextLabel")
+adminAbuseConfirmText.Size = UDim2.new(0, 300, 0, 70)
+adminAbuseConfirmText.Position = UDim2.new(0, 10, 0, 45)
+adminAbuseConfirmText.BackgroundTransparency = 1
+adminAbuseConfirmText.Text = "A summary of all secrets/infinities hatched during admin abuse will be sent to your webhook."
+adminAbuseConfirmText.TextColor3 = Color3.fromRGB(255, 255, 255)
+adminAbuseConfirmText.TextSize = 11
+adminAbuseConfirmText.Font = Enum.Font.Gotham
+adminAbuseConfirmText.TextWrapped = true
+adminAbuseConfirmText.ZIndex = 21
+adminAbuseConfirmText.Parent = adminAbuseConfirmFrame
+
+local adminAbuseYesBtn = Instance.new("TextButton")
+adminAbuseYesBtn.Size = UDim2.new(0, 130, 0, 35)
+adminAbuseYesBtn.Position = UDim2.new(0, 15, 1, -50)
+adminAbuseYesBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+adminAbuseYesBtn.Text = "Yes, Stop & Send"
+adminAbuseYesBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+adminAbuseYesBtn.TextSize = 11
+adminAbuseYesBtn.Font = Enum.Font.GothamBold
+adminAbuseYesBtn.BorderSizePixel = 0
+adminAbuseYesBtn.ZIndex = 21
+adminAbuseYesBtn.Parent = adminAbuseConfirmFrame
+
+local adminAbuseNoBtn = Instance.new("TextButton")
+adminAbuseNoBtn.Size = UDim2.new(0, 130, 0, 35)
+adminAbuseNoBtn.Position = UDim2.new(1, -145, 1, -50)
+adminAbuseNoBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+adminAbuseNoBtn.Text = "Cancel"
+adminAbuseNoBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+adminAbuseNoBtn.TextSize = 11
+adminAbuseNoBtn.Font = Enum.Font.GothamBold
+adminAbuseNoBtn.BorderSizePixel = 0
+adminAbuseNoBtn.ZIndex = 21
+adminAbuseNoBtn.Parent = adminAbuseConfirmFrame
+
+adminAbuseToggleBtn.Activated:Connect(function()
+    if not scriptActive then return end
+    
+    if adminAbuseActive then
+        -- Show confirmation dialog
+        adminAbuseConfirmFrame.Visible = true
+    else
+        -- Turn ON admin abuse mode
+        adminAbuseActive = true
+        adminAbuseHatchedPets = {} -- Reset tracking
+        adminAbuseStartTime = os.time() -- Record start time
+        adminAbuseStartEggCount = getTotalEggsHatched() -- Record starting egg count
+        adminAbuseToggleBtn.Text = "Admin Abuse Mode: ON"
+        adminAbuseToggleBtn.BackgroundColor3 = Color3.fromRGB(255, 200, 50)
+        print(">>> ADMIN ABUSE MODE ACTIVATED <<<")
+    end
+end)
+
+adminAbuseYesBtn.MouseButton1Click:Connect(function()
+    if not scriptActive then return end
+    -- Turn OFF admin abuse mode and send summary
+    adminAbuseActive = false
+    adminAbuseToggleBtn.Text = "Admin Abuse Mode: OFF"
+    adminAbuseToggleBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    adminAbuseConfirmFrame.Visible = false
+    
+    -- Generate and send summary (function defined later)
+    sendAdminAbuseSummary()
+    
+    print(">>> ADMIN ABUSE MODE DEACTIVATED <<<")
+end)
+
+adminAbuseNoBtn.MouseButton1Click:Connect(function()
+    if not scriptActive then return end
+    adminAbuseConfirmFrame.Visible = false
+end)
+
+-- Close Script button - opens confirmation dialog
+closeScriptBtn.MouseButton1Click:Connect(function()
+    if not scriptActive then return end
+    confirmFrame.Visible = true
+end)
+
+-- Pet Detection Tab Button Handlers
+
+-- Secret Settings button - opens sub-menu
+secretSettingsBtn.Activated:Connect(function()
+    if not scriptActive then return end
+    secretSettingsMenu.Visible = true
+end)
+
+-- Main Secret Settings Back button
+mainSecretBackBtn.Activated:Connect(function()
+    secretSettingsMenu.Visible = false
+    saveSettings()
+end)
+
+-- Main Secret Settings Handlers
+mainSecretButtons.notifyNormal.Activated:Connect(function()
+    if not scriptActive then return end
+    secretNotifyNormal = not secretNotifyNormal
+    mainSecretButtons.notifyNormal.Text = secretNotifyNormal and "Normal: ON" or "Normal: OFF"
+    mainSecretButtons.notifyNormal.BackgroundColor3 = secretNotifyNormal and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+mainSecretButtons.notifyShiny.Activated:Connect(function()
+    if not scriptActive then return end
+    secretNotifyShiny = not secretNotifyShiny
+    mainSecretButtons.notifyShiny.Text = secretNotifyShiny and "Shiny: ON" or "Shiny: OFF"
+    mainSecretButtons.notifyShiny.BackgroundColor3 = secretNotifyShiny and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+mainSecretButtons.notifyMythic.Activated:Connect(function()
+    if not scriptActive then return end
+    secretNotifyMythic = not secretNotifyMythic
+    mainSecretButtons.notifyMythic.Text = secretNotifyMythic and "Mythic: ON" or "Mythic: OFF"
+    mainSecretButtons.notifyMythic.BackgroundColor3 = secretNotifyMythic and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+mainSecretButtons.notifyShinyMythic.Activated:Connect(function()
+    if not scriptActive then return end
+    secretNotifyShinyMythic = not secretNotifyShinyMythic
+    mainSecretButtons.notifyShinyMythic.Text = secretNotifyShinyMythic and "Shiny Mythic: ON" or "Shiny Mythic: OFF"
+    mainSecretButtons.notifyShinyMythic.BackgroundColor3 = secretNotifyShinyMythic and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+mainSecretButtons.notifyXL.Activated:Connect(function()
+    if not scriptActive then return end
+    secretNotifyXL = not secretNotifyXL
+    mainSecretButtons.notifyXL.Text = secretNotifyXL and "XL: ON" or "XL: OFF"
+    mainSecretButtons.notifyXL.BackgroundColor3 = secretNotifyXL and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+mainSecretButtons.notifyInfinity.Activated:Connect(function()
+    if not scriptActive then return end
+    infinityNotifyEnabled = not infinityNotifyEnabled
+    mainSecretButtons.notifyInfinity.Text = infinityNotifyEnabled and "Infinities: ON" or "Infinities: OFF"
+    mainSecretButtons.notifyInfinity.BackgroundColor3 = infinityNotifyEnabled and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+mainSecretButtons.pingNormal.Activated:Connect(function()
+    if not scriptActive then return end
+    secretPingNormal = not secretPingNormal
+    mainSecretButtons.pingNormal.Text = secretPingNormal and "Ping: ON" or "Ping: OFF"
+    mainSecretButtons.pingNormal.BackgroundColor3 = secretPingNormal and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+mainSecretButtons.pingShiny.Activated:Connect(function()
+    if not scriptActive then return end
+    secretPingShiny = not secretPingShiny
+    mainSecretButtons.pingShiny.Text = secretPingShiny and "Ping: ON" or "Ping: OFF"
+    mainSecretButtons.pingShiny.BackgroundColor3 = secretPingShiny and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+mainSecretButtons.pingMythic.Activated:Connect(function()
+    if not scriptActive then return end
+    secretPingMythic = not secretPingMythic
+    mainSecretButtons.pingMythic.Text = secretPingMythic and "Ping: ON" or "Ping: OFF"
+    mainSecretButtons.pingMythic.BackgroundColor3 = secretPingMythic and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+mainSecretButtons.pingShinyMythic.Activated:Connect(function()
+    if not scriptActive then return end
+    secretPingShinyMythic = not secretPingShinyMythic
+    mainSecretButtons.pingShinyMythic.Text = secretPingShinyMythic and "Ping: ON" or "Ping: OFF"
+    mainSecretButtons.pingShinyMythic.BackgroundColor3 = secretPingShinyMythic and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+mainSecretButtons.pingXL.Activated:Connect(function()
+    if not scriptActive then return end
+    secretPingXL = not secretPingXL
+    mainSecretButtons.pingXL.Text = secretPingXL and "Ping: ON" or "Ping: OFF"
+    mainSecretButtons.pingXL.BackgroundColor3 = secretPingXL and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+mainSecretButtons.pingInfinity.Activated:Connect(function()
+    if not scriptActive then return end
+    infinityPingEnabled = not infinityPingEnabled
+    mainSecretButtons.pingInfinity.Text = infinityPingEnabled and "Ping: ON" or "Ping: OFF"
+    mainSecretButtons.pingInfinity.BackgroundColor3 = infinityPingEnabled and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+mainSecretButtons.filter.Activated:Connect(function()
+    if not scriptActive then return end
+    secretFilterUnder1B = not secretFilterUnder1B
+    mainSecretButtons.filter.Text = secretFilterUnder1B and "Filter <1B Secrets: ON" or "Filter <1B Secrets: OFF"
+    mainSecretButtons.filter.BackgroundColor3 = secretFilterUnder1B and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    saveSettings()
+end)
+
+-- Legendary Detection toggle (in Extra tab)
+legendaryBtn.Activated:Connect(function()
+    if not scriptActive then return end
+    
+    legendaryDetectionEnabled = not legendaryDetectionEnabled
+    
+    if legendaryDetectionEnabled then
+        legendaryBtn.Text = "Legendary Detection: ON"
+        legendaryBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+    else
+        legendaryBtn.Text = "Legendary Detection: OFF"
+        legendaryBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    end
+    
+    saveSettings()
+end)
+
+-- Rift button handlers
+riftDetectionToggleBtn.MouseButton1Click:Connect(function()
     if not scriptActive then return end
     
     riftDetectionEnabled = not riftDetectionEnabled
     
     if riftDetectionEnabled then
-        toggleBtn.Text = "Rift Detection: ON"
-        toggleBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
-        addStatusLog("✓ Rift detection enabled")
+        riftDetectionToggleBtn.Text = "Rift Detection: ON"
+        riftDetectionToggleBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+        addRiftStatusLog("✓ Rift detection enabled")
     else
-        toggleBtn.Text = "Rift Detection: OFF"
-        toggleBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-        addStatusLog("✗ Rift detection disabled")
+        riftDetectionToggleBtn.Text = "Rift Detection: OFF"
+        riftDetectionToggleBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+        addRiftStatusLog("✗ Rift detection disabled")
     end
     
     saveSettings()
 end)
 
-riftBtn1.MouseButton1Click:Connect(function()
+rift2026Btn.MouseButton1Click:Connect(function()
     if not scriptActive then return end
     
     riftSelections["2026-egg"] = not riftSelections["2026-egg"]
     
     if riftSelections["2026-egg"] then
-        riftBtn1.Text = "✓ 2026 Egg"
-        riftBtn1.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
-        addStatusLog("✓ 2026 Egg Rift selected")
+        rift2026Btn.Text = "✓ 2026 Egg"
+        rift2026Btn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+        addRiftStatusLog("✓ 2026 Egg Rift selected")
     else
-        riftBtn1.Text = "☐ 2026 Egg"
-        riftBtn1.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-        addStatusLog("✗ 2026 Egg Rift deselected")
+        rift2026Btn.Text = "☐ 2026 Egg"
+        rift2026Btn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+        addRiftStatusLog("✗ 2026 Egg Rift deselected")
     end
     
     saveSettings()
 end)
 
-riftBtn2.MouseButton1Click:Connect(function()
+riftPeppermintBtn.MouseButton1Click:Connect(function()
     if not scriptActive then return end
     
     riftSelections["peppermint-chest"] = not riftSelections["peppermint-chest"]
     
     if riftSelections["peppermint-chest"] then
-        riftBtn2.Text = "✓ Peppermint"
-        riftBtn2.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
-        addStatusLog("✓ Peppermint Chest selected")
+        riftPeppermintBtn.Text = "✓ Peppermint"
+        riftPeppermintBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+        addRiftStatusLog("✓ Peppermint Chest selected")
     else
-        riftBtn2.Text = "☐ Peppermint"
-        riftBtn2.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-        addStatusLog("✗ Peppermint Chest deselected")
+        riftPeppermintBtn.Text = "☐ Peppermint"
+        riftPeppermintBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+        addRiftStatusLog("✗ Peppermint Chest deselected")
     end
     
     saveSettings()
 end)
 
-allEggsBtn.MouseButton1Click:Connect(function()
+riftAllEggsBtn.MouseButton1Click:Connect(function()
     if not scriptActive then return end
     
     allEggRiftsEnabled = not allEggRiftsEnabled
     
     if allEggRiftsEnabled then
-        allEggsBtn.Text = "All Event Egg Rifts: ON"
-        allEggsBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
-        addStatusLog("✓ All event egg rifts enabled")
+        riftAllEggsBtn.Text = "✓ All Eggs"
+        riftAllEggsBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+        addRiftStatusLog("✓ All event egg rifts enabled")
     else
-        allEggsBtn.Text = "All Event Egg Rifts: OFF"
-        allEggsBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-        addStatusLog("✗ All event egg rifts disabled")
+        riftAllEggsBtn.Text = "☐ All Eggs"
+        riftAllEggsBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+        addRiftStatusLog("✗ All event egg rifts disabled")
     end
     
     saveSettings()
 end)
 
--- Initialize
-loadSettings()
+riftPingToggleBtn.MouseButton1Click:Connect(function()
+    if not scriptActive then return end
+    
+    riftPingEnabled = not riftPingEnabled
+    
+    if riftPingEnabled then
+        riftPingToggleBtn.Text = "Ping on Teleport: ON"
+        riftPingToggleBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+    else
+        riftPingToggleBtn.Text = "Ping on Teleport: OFF"
+        riftPingToggleBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    end
+    
+    saveSettings()
+end)
 
--- Update button states
-if riftDetectionEnabled then
-    toggleBtn.Text = "Rift Detection: ON"
-    toggleBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
-end
+-- Hide X button - hides main GUI
+hideXBtn.MouseButton1Click:Connect(function()
+    if not scriptActive then return end
+    f.Visible = false
+    toggleBtn.Text = ">>>"
+    toggleBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+end)
 
-if riftSelections["2026-egg"] then
-    riftBtn1.Text = "✓ 2026 Egg"
-    riftBtn1.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
-end
+-- Toggle button - shows/hides main GUI
+toggleBtn.MouseButton1Click:Connect(function()
+    if not scriptActive then return end
+    f.Visible = not f.Visible
+    if f.Visible then
+        toggleBtn.Text = "GUI"
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(60, 120, 200)
+    else
+        toggleBtn.Text = ">>>"
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+    end
+end)
 
-if riftSelections["peppermint-chest"] then
-    riftBtn2.Text = "✓ Peppermint"
-    riftBtn2.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
-end
+-- Webhook URL input handler
+webhookInput.FocusLost:Connect(function(enterPressed)
+    local url = webhookInput.Text:gsub("^%s*(.-)%s*$", "%1")
+    webhookURL = url
+    print("Webhook URL saved: " .. (url ~= "" and "SET (" .. string.sub(url, 1, 50) .. "...)" or "EMPTY"))
+    saveSettings()
+end)
 
-if allEggRiftsEnabled then
-    allEggsBtn.Text = "All Event Egg Rifts: ON"
-    allEggsBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
-end
+-- Discord User ID input handler
+userIDInput.FocusLost:Connect(function(enterPressed)
+    local id = userIDInput.Text:gsub("^%s*(.-)%s*$", "%1")
+    discordUserID = id
+    print("Discord User ID saved: " .. (id ~= "" and id or "EMPTY"))
+    saveSettings()
+end)
 
-addStatusLog("✓ Script loaded and ready")
-setupRiftMonitoring()
+-- Yes button - closes everything
+yesBtn.MouseButton1Click:Connect(function()
+    if not scriptActive then return end
+    print("Closing script...")
+    
+    -- Mark script as inactive
+    scriptActive = false
+    
+    -- Hide confirmation dialog
+    confirmFrame.Visible = false
+    
+    -- Stop auto hatch
+    autoHatchEnabled = false
+    
+    -- Disconnect event connection
+    if hatchEventConnection then
+        hatchEventConnection:Disconnect()
+        hatchEventConnection = nil
+        print("✓ Event connection disconnected")
+    end
+    
+    -- Clear webhook queue
+    webhookQueue = {}
+    isSendingWebhook = false
+    print("✓ Webhook queue cleared")
+    
+    -- Destroy GUI
+    g:Destroy()
+    print("✓ GUI destroyed")
+    
+    print("Script closed by user - all functionality stopped")
+    error("Script closed")
+end)
 
-print("========================================")
-print("✓ Rift Auto Fly V2 loaded!")
-print("========================================")
+-- No button - closes confirmation dialog
+noBtn.MouseButton1Click:Connect(function()
+    if not scriptActive then return end
+    confirmFrame.Visible = false
+end)
+
+print("✓ GUI created")
+
+-- Update button states to reflect loaded settings
+task.wait(0.1) -- Small delay to ensure all GUI elements are fully created
+spawn(function()
+    
+    -- Update player tracking button
+    if playerTrackingEnabled then
+        playerBtn.Text = "Player Track: ON"
+        playerBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+    else
+        playerBtn.Text = "Player Track: OFF"
+        playerBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    end
+    
+    -- Update egg count monitoring button
+    if eggCountMonitoringEnabled then
+        eggMonitorBtn.Text = "Egg Monitor: ON"
+        eggMonitorBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+    else
+        eggMonitorBtn.Text = "Egg Monitor: OFF"
+        eggMonitorBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    end
+    
+    -- Update notification interval button
+    local hourText = eggMonitorIntervalHours == 1 and "Hour" or "Hours"
+    intervalBtn.Text = string.format("Interval: %d %s", eggMonitorIntervalHours, hourText)
+    
+    -- Update legendary detection button (in Extra tab)
+    if legendaryDetectionEnabled then
+        legendaryBtn.Text = "Legendary Detection: ON"
+        legendaryBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+    else
+        legendaryBtn.Text = "Legendary Detection: OFF"
+        legendaryBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    end
+    
+    -- Update rift detection buttons
+    if riftDetectionEnabled then
+        riftDetectionToggleBtn.Text = "Rift Detection: ON"
+        riftDetectionToggleBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+    else
+        riftDetectionToggleBtn.Text = "Rift Detection: OFF"
+        riftDetectionToggleBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    end
+    
+    if riftSelections["2026-egg"] then
+        rift2026Btn.Text = "✓ 2026 Egg"
+        rift2026Btn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+    else
+        rift2026Btn.Text = "☐ 2026 Egg"
+        rift2026Btn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    end
+    
+    if riftSelections["peppermint-chest"] then
+        riftPeppermintBtn.Text = "✓ Peppermint"
+        riftPeppermintBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+    else
+        riftPeppermintBtn.Text = "☐ Peppermint"
+        riftPeppermintBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    end
+    
+    if allEggRiftsEnabled then
+        riftAllEggsBtn.Text = "✓ All Eggs"
+        riftAllEggsBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+    else
+        riftAllEggsBtn.Text = "☐ All Eggs"
+        riftAllEggsBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    end
+    
+    if riftPingEnabled then
+        riftPingToggleBtn.Text = "Ping on Teleport: ON"
+        riftPingToggleBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+    else
+        riftPingToggleBtn.Text = "Ping on Teleport: OFF"
+        riftPingToggleBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    end
+    
+    -- Update main secret settings buttons
+    mainSecretButtons.notifyNormal.Text = secretNotifyNormal and "Normal: ON" or "Normal: OFF"
+    mainSecretButtons.notifyNormal.BackgroundColor3 = secretNotifyNormal and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    mainSecretButtons.notifyShiny.Text = secretNotifyShiny and "Shiny: ON" or "Shiny: OFF"
+    mainSecretButtons.notifyShiny.BackgroundColor3 = secretNotifyShiny and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    mainSecretButtons.notifyMythic.Text = secretNotifyMythic and "Mythic: ON" or "Mythic: OFF"
+    mainSecretButtons.notifyMythic.BackgroundColor3 = secretNotifyMythic and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    mainSecretButtons.notifyShinyMythic.Text = secretNotifyShinyMythic and "Shiny Mythic: ON" or "Shiny Mythic: OFF"
+    mainSecretButtons.notifyShinyMythic.BackgroundColor3 = secretNotifyShinyMythic and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    mainSecretButtons.notifyXL.Text = secretNotifyXL and "XL: ON" or "XL: OFF"
+    mainSecretButtons.notifyXL.BackgroundColor3 = secretNotifyXL and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    mainSecretButtons.notifyInfinity.Text = infinityNotifyEnabled and "Infinities: ON" or "Infinities: OFF"
+    mainSecretButtons.notifyInfinity.BackgroundColor3 = infinityNotifyEnabled and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    mainSecretButtons.pingNormal.Text = secretPingNormal and "Ping: ON" or "Ping: OFF"
+    mainSecretButtons.pingNormal.BackgroundColor3 = secretPingNormal and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    mainSecretButtons.pingShiny.Text = secretPingShiny and "Ping: ON" or "Ping: OFF"
+    mainSecretButtons.pingShiny.BackgroundColor3 = secretPingShiny and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    mainSecretButtons.pingMythic.Text = secretPingMythic and "Ping: ON" or "Ping: OFF"
+    mainSecretButtons.pingMythic.BackgroundColor3 = secretPingMythic and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    mainSecretButtons.pingShinyMythic.Text = secretPingShinyMythic and "Ping: ON" or "Ping: OFF"
+    mainSecretButtons.pingShinyMythic.BackgroundColor3 = secretPingShinyMythic and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    mainSecretButtons.pingXL.Text = secretPingXL and "Ping: ON" or "Ping: OFF"
+    mainSecretButtons.pingXL.BackgroundColor3 = secretPingXL and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    mainSecretButtons.pingInfinity.Text = infinityPingEnabled and "Ping: ON" or "Ping: OFF"
+    mainSecretButtons.pingInfinity.BackgroundColor3 = infinityPingEnabled and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    mainSecretButtons.filter.Text = secretFilterUnder1B and "Filter <1B Secrets: ON" or "Filter <1B Secrets: OFF"
+    mainSecretButtons.filter.BackgroundColor3 = secretFilterUnder1B and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    -- Update admin secret settings buttons
+    adminSecretButtons.notifyNormal.Text = adminAbuseSecretSettings.notifyNormal and "Normal: ON" or "Normal: OFF"
+    adminSecretButtons.notifyNormal.BackgroundColor3 = adminAbuseSecretSettings.notifyNormal and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    adminSecretButtons.notifyShiny.Text = adminAbuseSecretSettings.notifyShiny and "Shiny: ON" or "Shiny: OFF"
+    adminSecretButtons.notifyShiny.BackgroundColor3 = adminAbuseSecretSettings.notifyShiny and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    adminSecretButtons.notifyMythic.Text = adminAbuseSecretSettings.notifyMythic and "Mythic: ON" or "Mythic: OFF"
+    adminSecretButtons.notifyMythic.BackgroundColor3 = adminAbuseSecretSettings.notifyMythic and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    adminSecretButtons.notifyShinyMythic.Text = adminAbuseSecretSettings.notifyShinyMythic and "Shiny Mythic: ON" or "Shiny Mythic: OFF"
+    adminSecretButtons.notifyShinyMythic.BackgroundColor3 = adminAbuseSecretSettings.notifyShinyMythic and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    adminSecretButtons.notifyXL.Text = adminAbuseSecretSettings.notifyXL and "XL: ON" or "XL: OFF"
+    adminSecretButtons.notifyXL.BackgroundColor3 = adminAbuseSecretSettings.notifyXL and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    local adminInfinityNotify = adminAbuseSecretSettings.notifyInfinity
+    if adminInfinityNotify == nil then adminInfinityNotify = true end
+    adminSecretButtons.notifyInfinity.Text = adminInfinityNotify and "Infinities: ON" or "Infinities: OFF"
+    adminSecretButtons.notifyInfinity.BackgroundColor3 = adminInfinityNotify and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    adminSecretButtons.pingNormal.Text = adminAbuseSecretSettings.pingNormal and "Ping: ON" or "Ping: OFF"
+    adminSecretButtons.pingNormal.BackgroundColor3 = adminAbuseSecretSettings.pingNormal and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    adminSecretButtons.pingShiny.Text = adminAbuseSecretSettings.pingShiny and "Ping: ON" or "Ping: OFF"
+    adminSecretButtons.pingShiny.BackgroundColor3 = adminAbuseSecretSettings.pingShiny and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    adminSecretButtons.pingMythic.Text = adminAbuseSecretSettings.pingMythic and "Ping: ON" or "Ping: OFF"
+    adminSecretButtons.pingMythic.BackgroundColor3 = adminAbuseSecretSettings.pingMythic and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    adminSecretButtons.pingShinyMythic.Text = adminAbuseSecretSettings.pingShinyMythic and "Ping: ON" or "Ping: OFF"
+    adminSecretButtons.pingShinyMythic.BackgroundColor3 = adminAbuseSecretSettings.pingShinyMythic and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    adminSecretButtons.pingXL.Text = adminAbuseSecretSettings.pingXL and "Ping: ON" or "Ping: OFF"
+    adminSecretButtons.pingXL.BackgroundColor3 = adminAbuseSecretSettings.pingXL and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    local adminInfinityPing = adminAbuseSecretSettings.pingInfinity
+    if adminInfinityPing == nil then adminInfinityPing = true end
+    adminSecretButtons.pingInfinity.Text = adminInfinityPing and "Ping: ON" or "Ping: OFF"
+    adminSecretButtons.pingInfinity.BackgroundColor3 = adminInfinityPing and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    adminSecretButtons.filter.Text = adminAbuseSecretSettings.filterUnder1B and "Filter <1B Secrets: ON" or "Filter <1B Secrets: OFF"
+    adminSecretButtons.filter.BackgroundColor3 = adminAbuseSecretSettings.filterUnder1B and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(60, 60, 60)
+    
+    print("✓ Button states updated from loaded settings")
+end)
+
+
+print("Ready! Click 'Auto Hatch' to start hatching")
+
+-- Monitor GUI to detect if it gets destroyed unexpectedly
+g.AncestryChanged:Connect(function(child, parent)
+    if not parent and scriptActive then
+        warn("WARNING: GUI was destroyed or removed!")
+    end
+end)
+
