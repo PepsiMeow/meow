@@ -843,13 +843,15 @@ local function returnToStoredPosition()
         addRiftStatusLog("✓ Returned to previous location")
         
         -- Send webhook notification (no ping)
-        local playerName = p.Name or "Unknown Player"
-        table.insert(webhookQueue, {
-            message = "🎯 " .. playerName .. " has successfully teleported back from the rift.",
-            isPlainText = true,
-            shouldPing = false
-        })
-        processWebhookQueue()
+        if scriptActive and webhookURL ~= "" then
+            local playerName = p.Name or "Unknown Player"
+            table.insert(webhookQueue, {
+                message = "🎯 " .. playerName .. " has successfully teleported back from the rift.",
+                isPlainText = true,
+                shouldPing = false
+            })
+            processWebhookQueue()
+        end
     end
     
     -- Always reset state regardless of teleport success/failure
@@ -993,16 +995,18 @@ local function handleRiftSpawn(rift)
         addRiftStatusLog("⚡ Teleported to " .. displayNameWithMultiplier)
         
         -- Send webhook notification
-        local playerName = p.Name or "Unknown Player"
-        local webhookMessage = playerName .. " teleported to a " .. displayNameWithMultiplier .. " rift"
-        webhookMessage = webhookMessage .. "\n**Duration:** " .. math.floor(riftDuration / 60) .. "m " .. math.floor(riftDuration % 60) .. "s"
-        local actualShouldPing = riftPingEnabled -- Only ping if toggle is enabled
-        table.insert(webhookQueue, {
-            message = "🎯 " .. webhookMessage,
-            isPlainText = true,
-            shouldPing = actualShouldPing or false
-        })
-        processWebhookQueue()
+        if scriptActive and webhookURL ~= "" then
+            local playerName = p.Name or "Unknown Player"
+            local webhookMessage = playerName .. " teleported to a " .. displayNameWithMultiplier .. " rift"
+            webhookMessage = webhookMessage .. "\n**Duration:** " .. math.floor(riftDuration / 60) .. "m " .. math.floor(riftDuration % 60) .. "s"
+            local actualShouldPing = riftPingEnabled -- Only ping if toggle is enabled
+            table.insert(webhookQueue, {
+                message = "🎯 " .. webhookMessage,
+                isPlainText = true,
+                shouldPing = actualShouldPing or false
+            })
+            processWebhookQueue()
+        end
         
         -- Monitor duration
         spawn(function()
