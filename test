@@ -81,6 +81,7 @@ local riftSelections = {
 }
 local allEggRiftsEnabled = false
 local isAtRift = false
+local returningFromRift = false -- Guard flag to prevent multiple return calls
 local storedPosition = nil
 local currentRift = nil
 local riftStartTime = nil
@@ -140,7 +141,7 @@ local function loadSettings()
                     if decoded.xlPingEnabled ~= nil then xlPingEnabled = decoded.xlPingEnabled end
                     if decoded.legendaryDetectionEnabled ~= nil then legendaryDetectionEnabled = decoded.legendaryDetectionEnabled end
                     if decoded.legendaryPingEnabled ~= nil then legendaryPingEnabled = decoded.legendaryPingEnabled end
-                    if decoded.riftDetectionEnabled ~= nil then riftDetectionEnabled = decoded.riftDetectionEnabled end
+                    -- riftDetectionEnabled is NOT loaded - always defaults to false
                     if decoded.riftPingEnabled ~= nil then riftPingEnabled = decoded.riftPingEnabled end
                     if decoded.allEggRiftsEnabled ~= nil then allEggRiftsEnabled = decoded.allEggRiftsEnabled end
                     if decoded.riftSelections and type(decoded.riftSelections) == "table" then
@@ -188,7 +189,8 @@ local function saveSettings()
             infinityNotifyEnabled = infinityNotifyEnabled, infinityPingEnabled = infinityPingEnabled,
             xlDetectionEnabled = xlDetectionEnabled, xlPingEnabled = xlPingEnabled,
             legendaryDetectionEnabled = legendaryDetectionEnabled, legendaryPingEnabled = legendaryPingEnabled,
-            riftDetectionEnabled = riftDetectionEnabled, riftPingEnabled = riftPingEnabled,
+            -- riftDetectionEnabled is NOT saved - always defaults to false on script start
+            riftPingEnabled = riftPingEnabled,
             allEggRiftsEnabled = allEggRiftsEnabled, riftSelections = riftSelections,
             adminAbuseSecretSettings = adminAbuseSecretSettings
         }
@@ -472,6 +474,9 @@ end
 
 -- Build full pet name with variants
 local function buildFullPetName(petName, shiny, mythic, xl)
+    -- Guard against nil petName to avoid concatenation errors
+    petName = petName or "Unknown Pet"
+
     local prefix = ""
     if shiny and mythic then
         prefix = "Shiny Mythic "
@@ -853,25 +858,31 @@ end
 
 -- Return to stored position
 local function returnToStoredPosition()
-    if not storedPosition then return end
+    if not storedPosition or returningFromRift then return end
     
+    returningFromRift = true -- Set flag to prevent multiple calls
     addRiftStatusLog("🔙 Returning to previous position...")
     
-    if teleportToPosition(storedPosition) then
+    local teleportSuccess = teleportToPosition(storedPosition)
+    
+    if teleportSuccess then
         addRiftStatusLog("✓ Returned to previous location")
         
         -- Send webhook notification (no ping)
         local playerName = p.Name or "Unknown Player"
         sendRiftWebhook(playerName .. " has successfully teleported back from the rift.", false)
-        
-        -- Reset state
-        isAtRift = false
-        currentRift = nil
-        riftStartTime = nil
-        storedPosition = nil
-        riftDuration = 0
-        luckMultiplier = nil
     end
+    
+    -- Always reset state regardless of teleport success/failure
+    -- This ensures player can teleport to new rifts even if return teleport fails
+    isAtRift = false
+    currentRift = nil
+    riftStartTime = nil
+    storedPosition = nil
+    riftDuration = 0
+    luckMultiplier = nil
+    
+    returningFromRift = false -- Clear flag
 end
 
 -- Handle rift spawn
@@ -2316,6 +2327,10 @@ secretSettingsBtn.Font = Enum.Font.GothamBold
 secretSettingsBtn.BorderSizePixel = 0
 secretSettingsBtn.Parent = detectionContent
 
+local secretSettingsCorner = Instance.new("UICorner")
+secretSettingsCorner.CornerRadius = UDim.new(0, 4)
+secretSettingsCorner.Parent = secretSettingsBtn
+
 local secretSettingsDesc = Instance.new("TextLabel")
 secretSettingsDesc.Size = UDim2.new(0, 330, 0, 22)
 secretSettingsDesc.Position = UDim2.new(0, 15, 0, 100)
@@ -2341,6 +2356,10 @@ adminAbuseToggleBtn.Font = Enum.Font.GothamBold
 adminAbuseToggleBtn.BorderSizePixel = 0
 adminAbuseToggleBtn.Parent = detectionContent
 
+local adminAbuseToggleCorner = Instance.new("UICorner")
+adminAbuseToggleCorner.CornerRadius = UDim.new(0, 4)
+adminAbuseToggleCorner.Parent = adminAbuseToggleBtn
+
 local adminAbuseToggleDesc = Instance.new("TextLabel")
 adminAbuseToggleDesc.Size = UDim2.new(0, 330, 0, 20)
 adminAbuseToggleDesc.Position = UDim2.new(0, 15, 0, 172)
@@ -2365,6 +2384,10 @@ adminAbuseSettingsBtn.TextSize = 13
 adminAbuseSettingsBtn.Font = Enum.Font.GothamBold
 adminAbuseSettingsBtn.BorderSizePixel = 0
 adminAbuseSettingsBtn.Parent = detectionContent
+
+local adminAbuseSettingsCorner = Instance.new("UICorner")
+adminAbuseSettingsCorner.CornerRadius = UDim.new(0, 4)
+adminAbuseSettingsCorner.Parent = adminAbuseSettingsBtn
 
 -- Tab switching helper function
 local function switchTab(activeContent, activeTab)
@@ -2406,6 +2429,10 @@ autoHatchBtn.Font = Enum.Font.GothamBold
 autoHatchBtn.BorderSizePixel = 0
 autoHatchBtn.Parent = hatchingContent
 
+local autoHatchCorner = Instance.new("UICorner")
+autoHatchCorner.CornerRadius = UDim.new(0, 4)
+autoHatchCorner.Parent = autoHatchBtn
+
 -- Webhook URL label
 local webhookLabel = Instance.new("TextLabel")
 webhookLabel.Size = UDim2.new(0, 330, 0, 20)
@@ -2433,6 +2460,10 @@ webhookInput.BorderSizePixel = 0
 webhookInput.TextTruncate = Enum.TextTruncate.AtEnd
 webhookInput.Parent = hatchingContent
 
+local webhookInputCorner = Instance.new("UICorner")
+webhookInputCorner.CornerRadius = UDim.new(0, 4)
+webhookInputCorner.Parent = webhookInput
+
 -- Discord User ID label
 local userIDLabel = Instance.new("TextLabel")
 userIDLabel.Size = UDim2.new(0, 330, 0, 20)
@@ -2459,6 +2490,10 @@ userIDInput.Font = Enum.Font.Gotham
 userIDInput.BorderSizePixel = 0
 userIDInput.Parent = hatchingContent
 
+local userIDInputCorner = Instance.new("UICorner")
+userIDInputCorner.CornerRadius = UDim.new(0, 4)
+userIDInputCorner.Parent = userIDInput
+
 -- X button on main GUI (top right of frame) - hides GUI
 local hideXBtn = Instance.new("TextButton")
 hideXBtn.Size = UDim2.new(0, 30, 0, 30)
@@ -2472,6 +2507,10 @@ hideXBtn.BorderSizePixel = 0
 hideXBtn.ZIndex = 10
 hideXBtn.Active = true
 hideXBtn.Parent = f
+
+local hideXCorner = Instance.new("UICorner")
+hideXCorner.CornerRadius = UDim.new(0, 4)
+hideXCorner.Parent = hideXBtn
 
 -- Toggle button (top right of screen - always visible)
 local toggleBtn = Instance.new("TextButton")
@@ -2522,6 +2561,10 @@ eggMonitorBtn.Font = Enum.Font.GothamBold
 eggMonitorBtn.BorderSizePixel = 0
 eggMonitorBtn.Parent = extraContent
 
+local eggMonitorCorner = Instance.new("UICorner")
+eggMonitorCorner.CornerRadius = UDim.new(0, 4)
+eggMonitorCorner.Parent = eggMonitorBtn
+
 local eggMonitorDesc = Instance.new("TextLabel")
 eggMonitorDesc.Size = UDim2.new(0, 155, 0, 22)
 eggMonitorDesc.Position = UDim2.new(0, 15, 0, 82)
@@ -2546,6 +2589,10 @@ intervalBtn.TextSize = 11
 intervalBtn.Font = Enum.Font.GothamBold
 intervalBtn.BorderSizePixel = 0
 intervalBtn.Parent = extraContent
+
+local intervalCorner = Instance.new("UICorner")
+intervalCorner.CornerRadius = UDim.new(0, 4)
+intervalCorner.Parent = intervalBtn
 
 local intervalDesc = Instance.new("TextLabel")
 intervalDesc.Size = UDim2.new(0, 155, 0, 22)
@@ -2572,6 +2619,10 @@ legendaryBtn.Font = Enum.Font.GothamBold
 legendaryBtn.BorderSizePixel = 0
 legendaryBtn.Parent = extraContent
 
+local legendaryCorner = Instance.new("UICorner")
+legendaryCorner.CornerRadius = UDim.new(0, 4)
+legendaryCorner.Parent = legendaryBtn
+
 local legendaryDesc = Instance.new("TextLabel")
 legendaryDesc.Size = UDim2.new(0, 155, 0, 22)
 legendaryDesc.Position = UDim2.new(0, 15, 0, 142)
@@ -2597,6 +2648,10 @@ playerBtn.Font = Enum.Font.GothamBold
 playerBtn.BorderSizePixel = 0
 playerBtn.Parent = extraContent
 
+local playerCorner = Instance.new("UICorner")
+playerCorner.CornerRadius = UDim.new(0, 4)
+playerCorner.Parent = playerBtn
+
 local playerDesc = Instance.new("TextLabel")
 playerDesc.Size = UDim2.new(0, 155, 0, 22)
 playerDesc.Position = UDim2.new(0, 180, 0, 142)
@@ -2621,6 +2676,10 @@ closeScriptBtn.TextSize = 13
 closeScriptBtn.Font = Enum.Font.GothamBold
 closeScriptBtn.BorderSizePixel = 0
 closeScriptBtn.Parent = extraContent
+
+local closeScriptCorner = Instance.new("UICorner")
+closeScriptCorner.CornerRadius = UDim.new(0, 4)
+closeScriptCorner.Parent = closeScriptBtn
 
 local closeScriptDesc = Instance.new("TextLabel")
 closeScriptDesc.Size = UDim2.new(0, 320, 0, 18)
@@ -2698,7 +2757,7 @@ local riftPeppermintBtn = Instance.new("TextButton")
 riftPeppermintBtn.Size = UDim2.new(0, 155, 0, 28)
 riftPeppermintBtn.Position = UDim2.new(0, 180, 0, 90)
 riftPeppermintBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-riftPeppermintBtn.Text = "☐ Peppermint"
+riftPeppermintBtn.Text = "☐ Peppermint Chest"
 riftPeppermintBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 riftPeppermintBtn.TextSize = 11
 riftPeppermintBtn.Font = Enum.Font.GothamBold
@@ -2770,7 +2829,7 @@ local riftStatusLabel = Instance.new("TextLabel")
 riftStatusLabel.Size = UDim2.new(1, -12, 0, 20)
 riftStatusLabel.Position = UDim2.new(0, 6, 0, 6)
 riftStatusLabel.BackgroundTransparency = 1
-riftStatusLabel.Text = "Waiting for rifts..."
+riftStatusLabel.Text = "Waiting for rift..."
 riftStatusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
 riftStatusLabel.TextSize = 10
 riftStatusLabel.Font = Enum.Font.Gotham
@@ -2820,18 +2879,14 @@ local function updateRiftStatusDisplay()
                 
                 text = text .. "🎯 Rift: " .. currentRiftDisplayName .. "\n"
                 text = text .. "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                
-                if actualTimeRemaining <= 0 then
-                    returnToStoredPosition()
-                    return
-                end
             end
         end)
     end
     
-    if #riftStatusLog == 0 then
-        text = text .. "Waiting for rifts..."
-    else
+    -- Show log entries (or "Waiting for rift..." if no log entries and not at a rift)
+    if #riftStatusLog == 0 and not isAtRift then
+        text = text .. "Waiting for rift..."
+    elseif #riftStatusLog > 0 then
         for i = #riftStatusLog, 1, -1 do
             text = text .. riftStatusLog[i] .. "\n"
         end
@@ -2898,6 +2953,10 @@ yesBtn.BorderSizePixel = 0
 yesBtn.ZIndex = 21
 yesBtn.Parent = confirmFrame
 
+local yesBtnCorner = Instance.new("UICorner")
+yesBtnCorner.CornerRadius = UDim.new(0, 4)
+yesBtnCorner.Parent = yesBtn
+
 local noBtn = Instance.new("TextButton")
 noBtn.Size = UDim2.new(0, 120, 0, 35)
 noBtn.Position = UDim2.new(1, -140, 1, -50)
@@ -2909,6 +2968,10 @@ noBtn.Font = Enum.Font.GothamBold
 noBtn.BorderSizePixel = 0
 noBtn.ZIndex = 21
 noBtn.Parent = confirmFrame
+
+local noBtnCorner = Instance.new("UICorner")
+noBtnCorner.CornerRadius = UDim.new(0, 4)
+noBtnCorner.Parent = noBtn
 
 -- ==================== SECRET DETECTION SETTINGS SUB-MENU ====================
 
@@ -2951,6 +3014,10 @@ local function createSecretSettingsMenu(parentFrame, isAdminAbuse)
     backBtn.BorderSizePixel = 0
     backBtn.ZIndex = 8
     backBtn.Parent = bg
+    
+    local backBtnCorner = Instance.new("UICorner")
+    backBtnCorner.CornerRadius = UDim.new(0, 4)
+    backBtnCorner.Parent = backBtn
     
     -- Section labels
     local notifyLabel = Instance.new("TextLabel")
@@ -3004,6 +3071,11 @@ local function createSecretSettingsMenu(parentFrame, isAdminAbuse)
         notifyBtn.BorderSizePixel = 0
         notifyBtn.ZIndex = 7
         notifyBtn.Parent = bg
+        
+        local notifyBtnCorner = Instance.new("UICorner")
+        notifyBtnCorner.CornerRadius = UDim.new(0, 4)
+        notifyBtnCorner.Parent = notifyBtn
+        
         buttons["notify" .. row.key] = notifyBtn
         
         -- Ping button (right) - smaller size
@@ -3018,6 +3090,11 @@ local function createSecretSettingsMenu(parentFrame, isAdminAbuse)
         pingBtn.BorderSizePixel = 0
         pingBtn.ZIndex = 7
         pingBtn.Parent = bg
+        
+        local pingBtnCorner = Instance.new("UICorner")
+        pingBtnCorner.CornerRadius = UDim.new(0, 4)
+        pingBtnCorner.Parent = pingBtn
+        
         buttons["ping" .. row.key] = pingBtn
     end
     
@@ -3033,6 +3110,11 @@ local function createSecretSettingsMenu(parentFrame, isAdminAbuse)
     filterBtn.BorderSizePixel = 0
     filterBtn.ZIndex = 7
     filterBtn.Parent = bg
+    
+    local filterBtnCorner = Instance.new("UICorner")
+    filterBtnCorner.CornerRadius = UDim.new(0, 4)
+    filterBtnCorner.Parent = filterBtn
+    
     buttons["filter"] = filterBtn
     
     return buttons, backBtn
@@ -3329,6 +3411,10 @@ adminAbuseYesBtn.BorderSizePixel = 0
 adminAbuseYesBtn.ZIndex = 21
 adminAbuseYesBtn.Parent = adminAbuseConfirmFrame
 
+local adminAbuseYesCorner = Instance.new("UICorner")
+adminAbuseYesCorner.CornerRadius = UDim.new(0, 4)
+adminAbuseYesCorner.Parent = adminAbuseYesBtn
+
 local adminAbuseNoBtn = Instance.new("TextButton")
 adminAbuseNoBtn.Size = UDim2.new(0, 130, 0, 35)
 adminAbuseNoBtn.Position = UDim2.new(1, -145, 1, -50)
@@ -3340,6 +3426,10 @@ adminAbuseNoBtn.Font = Enum.Font.GothamBold
 adminAbuseNoBtn.BorderSizePixel = 0
 adminAbuseNoBtn.ZIndex = 21
 adminAbuseNoBtn.Parent = adminAbuseConfirmFrame
+
+local adminAbuseNoCorner = Instance.new("UICorner")
+adminAbuseNoCorner.CornerRadius = UDim.new(0, 4)
+adminAbuseNoCorner.Parent = adminAbuseNoBtn
 
 adminAbuseToggleBtn.Activated:Connect(function()
     if not scriptActive then return end
@@ -3536,7 +3626,7 @@ riftDetectionToggleBtn.MouseButton1Click:Connect(function()
         addRiftStatusLog("✗ Rift detection disabled")
     end
     
-    saveSettings()
+    -- Note: riftDetectionEnabled is NOT saved - always resets to false on script restart
 end)
 
 rift2026Btn.MouseButton1Click:Connect(function()
@@ -3563,11 +3653,11 @@ riftPeppermintBtn.MouseButton1Click:Connect(function()
     riftSelections["peppermint-chest"] = not riftSelections["peppermint-chest"]
     
     if riftSelections["peppermint-chest"] then
-        riftPeppermintBtn.Text = "✓ Peppermint"
+        riftPeppermintBtn.Text = "✓ Peppermint Chest"
         riftPeppermintBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
         addRiftStatusLog("✓ Peppermint Chest selected")
     else
-        riftPeppermintBtn.Text = "☐ Peppermint"
+        riftPeppermintBtn.Text = "☐ Peppermint Chest"
         riftPeppermintBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
         addRiftStatusLog("✗ Peppermint Chest deselected")
     end
@@ -3741,10 +3831,10 @@ spawn(function()
     end
     
     if riftSelections["peppermint-chest"] then
-        riftPeppermintBtn.Text = "✓ Peppermint"
+        riftPeppermintBtn.Text = "✓ Peppermint Chest"
         riftPeppermintBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
     else
-        riftPeppermintBtn.Text = "☐ Peppermint"
+        riftPeppermintBtn.Text = "☐ Peppermint Chest"
         riftPeppermintBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
     end
     
