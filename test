@@ -714,126 +714,7 @@ local function sendDiscordNotificationInternal(petName, shiny, mythic, xl, eggNa
     return sendPetNotificationWebhook(petName, shiny, mythic, xl, eggName, rarity, pet, petImageUrl, "secret", shouldPing)
 end
 
--- ==================== RIFT DETECTION FUNCTIONS ====================
-
--- Format egg name with multiplier prefix if available
-local function formatEggNameWithMultiplier(baseName, multiplier)
-    if multiplier and multiplier > 0 then
-        return tostring(multiplier) .. "x " .. baseName
-    end
-    return baseName
-end
-
--- Get luck multiplier from rift (tries multiple methods)
-local function getRiftBonusLuck(rift)
-    -- Method 1: Direct attribute on rift
-    local bonusLuck = rift:GetAttribute("BonusLuck")
-    if bonusLuck then
-        return bonusLuck
-    end
-    
-    -- Method 2: Check children with "Egg" tag (as per RandomScripts.lua)
-    pcall(function()
-        for _, child in ipairs(rift:GetChildren()) do
-            if child:HasTag("Egg") then
-                local childBonusLuck = child:GetAttribute("BonusLuck")
-                if childBonusLuck then
-                    bonusLuck = childBonusLuck
-                    break
-                end
-            end
-        end
-    end)
-    
-    if bonusLuck then
-        return bonusLuck
-    end
-    
-    -- Method 3: Fallback attributes
-    return rift:GetAttribute("Luck") or rift:GetAttribute("Multiplier")
-end
-
--- Get rift position
-local function getRiftPosition(rift)
-    local riftPos = nil
-    
-    pcall(function()
-        -- For chest rifts: Find Chest object
-        if rift:FindFirstChild("Chest") then
-            local chest = rift.Chest
-            if chest:FindFirstChild("Prompt") then
-                local prompt = chest.Prompt
-                if prompt.Parent and prompt.Parent:IsA("BasePart") then
-                    riftPos = prompt.Parent.Position
-                end
-            end
-            if not riftPos and chest:IsA("BasePart") then
-                riftPos = chest.Position
-            end
-        end
-        
-        -- For egg rifts: Use PivotPosition or PrimaryPart
-        if not riftPos and rift:IsA("Model") then
-            if rift.PrimaryPart then
-                riftPos = rift.PrimaryPart.Position
-            else
-                riftPos = rift:GetPivot().Position
-            end
-        end
-        
-        -- Fallback: Direct BasePart
-        if not riftPos and rift:IsA("BasePart") then
-            riftPos = rift.Position
-        end
-    end)
-    
-    return riftPos
-end
-
--- Teleport to position
-local function teleportToPosition(position)
-    local char = p.Character
-    if not char or not char:FindFirstChild("HumanoidRootPart") then
-        return false
-    end
-    
-    local hrp = char.HumanoidRootPart
-    
-    -- Disable collision temporarily
-    pcall(function()
-        for _, part in pairs(char:GetDescendants()) do
-            if part:IsA("BasePart") then
-                part.CanCollide = false
-            end
-        end
-    end)
-    
-    -- Teleport
-    hrp.CFrame = CFrame.new(position)
-    
-    -- Re-enable collision after a moment
-    task.wait(0.1)
-    pcall(function()
-        for _, part in pairs(char:GetDescendants()) do
-            if part:IsA("BasePart") then
-                part.CanCollide = true
-            end
-        end
-    end)
-    
-    return true
-end
-
--- Add message to rift status log
-local function addRiftStatusLog(message)
-    table.insert(riftStatusLog, os.date("%H:%M:%S") .. " - " .. message)
-    if #riftStatusLog > maxRiftLogEntries then
-        table.remove(riftStatusLog, 1)
-    end
-    print("[RIFT] " .. message)
-end
-
--- Process webhook queue (moved before sendRiftWebhook to ensure it's defined)
+-- Process webhook queue (defined after all webhook functions it calls)
 local function processWebhookQueue()
     if isSendingWebhook or #webhookQueue == 0 or not scriptActive then
         return
@@ -971,6 +852,125 @@ local function processWebhookQueue()
         
         isSendingWebhook = false
     end)
+end
+
+-- ==================== RIFT DETECTION FUNCTIONS ====================
+
+-- Format egg name with multiplier prefix if available
+local function formatEggNameWithMultiplier(baseName, multiplier)
+    if multiplier and multiplier > 0 then
+        return tostring(multiplier) .. "x " .. baseName
+    end
+    return baseName
+end
+
+-- Get luck multiplier from rift (tries multiple methods)
+local function getRiftBonusLuck(rift)
+    -- Method 1: Direct attribute on rift
+    local bonusLuck = rift:GetAttribute("BonusLuck")
+    if bonusLuck then
+        return bonusLuck
+    end
+    
+    -- Method 2: Check children with "Egg" tag (as per RandomScripts.lua)
+    pcall(function()
+        for _, child in ipairs(rift:GetChildren()) do
+            if child:HasTag("Egg") then
+                local childBonusLuck = child:GetAttribute("BonusLuck")
+                if childBonusLuck then
+                    bonusLuck = childBonusLuck
+                    break
+                end
+            end
+        end
+    end)
+    
+    if bonusLuck then
+        return bonusLuck
+    end
+    
+    -- Method 3: Fallback attributes
+    return rift:GetAttribute("Luck") or rift:GetAttribute("Multiplier")
+end
+
+-- Get rift position
+local function getRiftPosition(rift)
+    local riftPos = nil
+    
+    pcall(function()
+        -- For chest rifts: Find Chest object
+        if rift:FindFirstChild("Chest") then
+            local chest = rift.Chest
+            if chest:FindFirstChild("Prompt") then
+                local prompt = chest.Prompt
+                if prompt.Parent and prompt.Parent:IsA("BasePart") then
+                    riftPos = prompt.Parent.Position
+                end
+            end
+            if not riftPos and chest:IsA("BasePart") then
+                riftPos = chest.Position
+            end
+        end
+        
+        -- For egg rifts: Use PivotPosition or PrimaryPart
+        if not riftPos and rift:IsA("Model") then
+            if rift.PrimaryPart then
+                riftPos = rift.PrimaryPart.Position
+            else
+                riftPos = rift:GetPivot().Position
+            end
+        end
+        
+        -- Fallback: Direct BasePart
+        if not riftPos and rift:IsA("BasePart") then
+            riftPos = rift.Position
+        end
+    end)
+    
+    return riftPos
+end
+
+-- Teleport to position
+local function teleportToPosition(position)
+    local char = p.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then
+        return false
+    end
+    
+    local hrp = char.HumanoidRootPart
+    
+    -- Disable collision temporarily
+    pcall(function()
+        for _, part in pairs(char:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.CanCollide = false
+            end
+        end
+    end)
+    
+    -- Teleport
+    hrp.CFrame = CFrame.new(position)
+    
+    -- Re-enable collision after a moment
+    task.wait(0.1)
+    pcall(function()
+        for _, part in pairs(char:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.CanCollide = true
+            end
+        end
+    end)
+    
+    return true
+end
+
+-- Add message to rift status log
+local function addRiftStatusLog(message)
+    table.insert(riftStatusLog, os.date("%H:%M:%S") .. " - " .. message)
+    if #riftStatusLog > maxRiftLogEntries then
+        table.remove(riftStatusLog, 1)
+    end
+    print("[RIFT] " .. message)
 end
 
 -- Send rift webhook notification
