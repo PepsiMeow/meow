@@ -12,7 +12,6 @@ print("RIFT AUTO FLY SCRIPT V2")
 print("Version: 3.0 - Simplified & Optimized")
 print("========================================")
 
--- Config
 local Config = {
     HEIGHT_OFFSET = 15, -- Teleport height above rift
     SETTINGS_FILE = "rift_auto_fly_v2_settings.json",
@@ -20,12 +19,36 @@ local Config = {
     RIFTS = {
         {name = "2026-egg", displayName = "2026 Egg Rift", type = "Egg"},
         {name = "peppermint-chest", displayName = "Peppermint Chest", type = "Chest"}
+    },
+
+    -- Event egg rifts that can be detected via the "All Egg Rifts" toggle
+    -- Note: Rift names in-game use dashes (e.g., "spikey-egg"), but matching handles both dashes and spaces
+    EVENT_EGGS = {
+        "spikey-egg",
+        "magma-egg",
+        "crystal-egg",
+        "lunar-egg",
+        "void-egg",
+        "hell-egg",
+        "nightmare-egg",
+        "rainbow-egg",
+        "festive-egg",
+        "gingerbread-egg",
+        "candycane-egg",
+        "aurora-egg",
+        "yuletide-egg",
+        "northpole-egg",
+        "snowman-egg",
+        "showman-egg", -- in case it's spelled this way internally
+        "mining-egg",
+        "neon-egg"
     }
 }
 
 -- State
 local scriptActive = true
 local riftDetectionEnabled = false
+local allEggRiftsEnabled = false
 local riftSelections = {
     ["2026-egg"] = false,
     ["peppermint-chest"] = false
@@ -64,6 +87,9 @@ local function loadSettings()
                     if decoded.riftDetectionEnabled ~= nil then
                         riftDetectionEnabled = decoded.riftDetectionEnabled
                     end
+                    if decoded.allEggRiftsEnabled ~= nil then
+                        allEggRiftsEnabled = decoded.allEggRiftsEnabled
+                    end
                     if decoded.riftSelections and type(decoded.riftSelections) == "table" then
                         for name, enabled in pairs(decoded.riftSelections) do
                             if riftSelections[name] ~= nil then
@@ -84,6 +110,7 @@ local function saveSettings()
     pcall(function()
         local settings = {
             riftDetectionEnabled = riftDetectionEnabled,
+            allEggRiftsEnabled = allEggRiftsEnabled,
             riftSelections = riftSelections
         }
         local encoded = HttpService:JSONEncode(settings)
@@ -197,7 +224,12 @@ local function handleRiftSpawn(rift)
     local isSelected = false
     local displayName = rift.Name
     local matchedRiftInfo = nil
+    local riftTypeAttr = nil
+    pcall(function()
+        riftTypeAttr = rift:GetAttribute("Type")
+    end)
     
+    -- 1) Exact specific rifts (2026 egg, peppermint chest)
     for _, riftInfo in ipairs(Config.RIFTS) do
         local searchName = string.lower(riftInfo.name)
         local searchDisplay = string.lower(riftInfo.displayName)
@@ -214,6 +246,21 @@ local function handleRiftSpawn(rift)
                 matchedRiftInfo = riftInfo
             end
             break
+        end
+    end
+
+    -- 2) Event egg rifts (group toggle)
+    if not isSelected and allEggRiftsEnabled then
+        local simplifiedName = riftName:gsub("%s+", ""):gsub("%-", "")
+        for _, eggName in ipairs(Config.EVENT_EGGS) do
+            local simplifiedEgg = eggName:lower():gsub("%s+", ""):gsub("%-", "")
+            if string.find(simplifiedName, simplifiedEgg, 1, true) or string.find(simplifiedEgg, simplifiedName, 1, true) then
+                isSelected = true
+                -- Format display name nicely (replace dash with space and capitalize)
+                displayName = eggName:gsub("%-", " "):gsub("^%l", string.upper)
+                matchedRiftInfo = { name = eggName, displayName = eggName, type = "Egg" }
+                break
+            end
         end
     end
     
@@ -396,7 +443,6 @@ titleText.Font = Enum.Font.GothamBold
 titleText.TextXAlignment = Enum.TextXAlignment.Left
 titleText.Parent = titleBar
 
--- Content area
 local contentFrame = Instance.new("Frame")
 contentFrame.Size = UDim2.new(1, -16, 1, -80)
 contentFrame.Position = UDim2.new(0, 8, 0, 38)
@@ -419,7 +465,7 @@ local toggleCorner = Instance.new("UICorner")
 toggleCorner.CornerRadius = UDim.new(0, 4)
 toggleCorner.Parent = toggleBtn
 
--- Rift selection buttons (side by side)
+-- Rift selection buttons (side by side) + all-egg toggle
 local riftBtn1 = Instance.new("TextButton")
 riftBtn1.Size = UDim2.new(0.48, 0, 0, 30)
 riftBtn1.Position = UDim2.new(0, 0, 0, 42)
@@ -450,10 +496,25 @@ local riftBtn2Corner = Instance.new("UICorner")
 riftBtn2Corner.CornerRadius = UDim.new(0, 4)
 riftBtn2Corner.Parent = riftBtn2
 
+local allEggsBtn = Instance.new("TextButton")
+allEggsBtn.Size = UDim2.new(1, 0, 0, 30)
+allEggsBtn.Position = UDim2.new(0, 0, 0, 80)
+allEggsBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+allEggsBtn.Text = "All Event Egg Rifts: OFF"
+allEggsBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+allEggsBtn.TextSize = 11
+allEggsBtn.Font = Enum.Font.GothamBold
+allEggsBtn.BorderSizePixel = 0
+allEggsBtn.Parent = contentFrame
+
+local allEggsCorner = Instance.new("UICorner")
+allEggsCorner.CornerRadius = UDim.new(0, 4)
+allEggsCorner.Parent = allEggsBtn
+
 -- Status display (scrollable)
 local statusFrame = Instance.new("ScrollingFrame")
 statusFrame.Size = UDim2.new(1, 0, 1, -82)
-statusFrame.Position = UDim2.new(0, 0, 0, 80)
+statusFrame.Position = UDim2.new(0, 0, 0, 118)
 statusFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
 statusFrame.BorderSizePixel = 1
 statusFrame.BorderColor3 = Color3.fromRGB(50, 50, 50)
@@ -590,6 +651,24 @@ riftBtn2.MouseButton1Click:Connect(function()
     saveSettings()
 end)
 
+allEggsBtn.MouseButton1Click:Connect(function()
+    if not scriptActive then return end
+    
+    allEggRiftsEnabled = not allEggRiftsEnabled
+    
+    if allEggRiftsEnabled then
+        allEggsBtn.Text = "All Event Egg Rifts: ON"
+        allEggsBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+        addStatusLog("✓ All event egg rifts enabled")
+    else
+        allEggsBtn.Text = "All Event Egg Rifts: OFF"
+        allEggsBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+        addStatusLog("✗ All event egg rifts disabled")
+    end
+    
+    saveSettings()
+end)
+
 -- Initialize
 loadSettings()
 
@@ -607,6 +686,11 @@ end
 if riftSelections["peppermint-chest"] then
     riftBtn2.Text = "✓ Peppermint"
     riftBtn2.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+end
+
+if allEggRiftsEnabled then
+    allEggsBtn.Text = "All Event Egg Rifts: ON"
+    allEggsBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
 end
 
 addStatusLog("✓ Script loaded and ready")
