@@ -1242,6 +1242,26 @@ local function processWebhookQueue()
     end)
 end
 
+-- Periodic queue processor - ensures queue is always processed every 2 seconds if items exist
+spawn(function()
+    while scriptActive do
+        task.wait(2)
+        if #webhookQueue > 0 and not isSendingWebhook and scriptActive and webhookURL and webhookURL ~= "" then
+            processWebhookQueue()
+        end
+    end
+end)
+
+-- Periodic queue processor - ensures queue is always processed every 2 seconds if items exist
+spawn(function()
+    while scriptActive do
+        task.wait(2)
+        if #webhookQueue > 0 and not isSendingWebhook and scriptActive then
+            processWebhookQueue()
+        end
+    end
+end)
+
 -- Public function to queue webhook (handles rate limiting)
 -- OPTIMIZED: No longer blocks on thumbnail URL fetching
 local function sendDiscordNotification(petName, shiny, mythic, xl, eggName, rarity, pet)
@@ -2247,22 +2267,10 @@ detectionTab.Font = Enum.Font.GothamBold
 detectionTab.BorderSizePixel = 0
 detectionTab.Parent = tabContainer
 
--- Extra tab button
-local extraTab = Instance.new("TextButton")
-extraTab.Size = UDim2.new(1, 0, 0, 50)
-extraTab.Position = UDim2.new(0, 0, 0, 100)
-extraTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-extraTab.Text = "Extra"
-extraTab.TextColor3 = Color3.fromRGB(255, 255, 255)
-extraTab.TextSize = 14
-extraTab.Font = Enum.Font.GothamBold
-extraTab.BorderSizePixel = 0
-extraTab.Parent = tabContainer
-
 -- Rifts tab button
 local riftsTab = Instance.new("TextButton")
 riftsTab.Size = UDim2.new(1, 0, 0, 50)
-riftsTab.Position = UDim2.new(0, 0, 0, 150)
+riftsTab.Position = UDim2.new(0, 0, 0, 100)
 riftsTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 riftsTab.Text = "Rifts"
 riftsTab.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -2270,6 +2278,18 @@ riftsTab.TextSize = 14
 riftsTab.Font = Enum.Font.GothamBold
 riftsTab.BorderSizePixel = 0
 riftsTab.Parent = tabContainer
+
+-- Extra tab button
+local extraTab = Instance.new("TextButton")
+extraTab.Size = UDim2.new(1, 0, 0, 50)
+extraTab.Position = UDim2.new(0, 0, 0, 150)
+extraTab.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+extraTab.Text = "Extra"
+extraTab.TextColor3 = Color3.fromRGB(255, 255, 255)
+extraTab.TextSize = 14
+extraTab.Font = Enum.Font.GothamBold
+extraTab.BorderSizePixel = 0
+extraTab.Parent = tabContainer
 
 -- Hatching content frame
 local hatchingContent = Instance.new("Frame")
@@ -2667,7 +2687,7 @@ local versionLabel = Instance.new("TextLabel")
 versionLabel.Size = UDim2.new(0, 330, 0, 16)
 versionLabel.Position = UDim2.new(0, 15, 1, -18)
 versionLabel.BackgroundTransparency = 1
-versionLabel.Text = "v6"
+versionLabel.Text = "v7"
 versionLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
 versionLabel.TextSize = 10
 versionLabel.Font = Enum.Font.Gotham
