@@ -832,14 +832,38 @@ end
 
 -- Return to stored position
 local function returnToStoredPosition()
-    if not storedPosition or returningFromRift then 
+    -- Prevent multiple calls
+    if returningFromRift then 
         return 
+    end
+    
+    -- Reset state FIRST before doing anything else
+    -- This ensures player is immediately available for new rifts
+    local previousRift = currentRift
+    isAtRift = false
+    currentRift = nil
+    riftStartTime = nil
+    local savedStoredPosition = storedPosition
+    storedPosition = nil
+    riftDuration = 0
+    luckMultiplier = nil
+    
+    -- Clear the previous rift from knownRifts so we can process it again if it respawns
+    -- (Rifts are unique objects, so we're just cleaning up the reference)
+    if previousRift then
+        knownRifts[previousRift] = nil
+    end
+    
+    -- Check if we have a stored position to return to
+    if not savedStoredPosition then
+        returningFromRift = false
+        return
     end
     
     returningFromRift = true -- Set flag to prevent multiple calls
     addRiftStatusLog("🔙 Returning to previous position...")
     
-    local teleportSuccess = teleportToPosition(storedPosition)
+    local teleportSuccess = teleportToPosition(savedStoredPosition)
     
     if teleportSuccess then
         addRiftStatusLog("✓ Returned to previous location")
@@ -857,22 +881,6 @@ local function returnToStoredPosition()
             -- Ensure queue processing starts
             processWebhookQueue()
         end
-    end
-    
-    -- Always reset state regardless of teleport success/failure
-    -- This ensures player can teleport to new rifts even if return teleport fails
-    local previousRift = currentRift
-    isAtRift = false
-    currentRift = nil
-    riftStartTime = nil
-    storedPosition = nil
-    riftDuration = 0
-    luckMultiplier = nil
-    
-    -- Clear the previous rift from knownRifts so we can process it again if it respawns
-    -- (Rifts are unique objects, so we're just cleaning up the reference)
-    if previousRift then
-        knownRifts[previousRift] = nil
     end
     
     returningFromRift = false -- Clear flag
