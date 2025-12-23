@@ -125,13 +125,30 @@ end
 -- ============================================================================
 
 -- Direct service access (matches original working pattern)
-local P = game:GetService("Players")
-local RS = game:GetService("ReplicatedStorage")
-local UIS = game:GetService("UserInputService")
-local VIM = game:GetService("VirtualInputManager")
-local HttpService = game:GetService("HttpService")
-local TextChatService = game:GetService("TextChatService")
-local RunService = game:GetService("RunService")
+-- Get services (some may be nil in certain executors/versions, handle gracefully)
+local P, RS, UIS, HttpService, RunService
+
+local success, err = pcall(function()
+    P = game:GetService("Players")
+    RS = game:GetService("ReplicatedStorage")
+    UIS = game:GetService("UserInputService")
+    HttpService = game:GetService("HttpService")
+    RunService = game:GetService("RunService")
+    return true
+end)
+
+if not success or not P or not RS then
+    error("Failed to get critical services (Players/ReplicatedStorage): " .. tostring(err))
+end
+
+-- Optional services (may not exist in all executors/versions)
+local VIM = nil
+local TextChatService = nil
+pcall(function() VIM = game:GetService("VirtualInputManager") end)
+pcall(function() TextChatService = game:GetService("TextChatService") end)
+
+-- Get LocalPlayer (may be nil if script runs before player joins, but usually available)
+-- If nil, we'll handle it later when creating GUI
 local p = P.LocalPlayer
 
 -- Helper function for safe LocalPlayer access (when needed)
