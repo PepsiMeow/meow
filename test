@@ -1208,19 +1208,13 @@ local function sendRiftWebhook(message, shouldPing)
     
     -- shouldPing parameter determines if we should ping (only when teleporting TO rift, not when returning)
     -- But only ping if riftPingEnabled toggle is ON
-    local mention = (shouldPing and riftPingEnabled and discordUserID ~= "") and ("<@" .. discordUserID .. ">") or ""
+    local actualShouldPing = shouldPing and riftPingEnabled
     
+    -- Add to queue with same format as other working webhooks
     table.insert(webhookQueue, {
-        isCustomEmbed = true,
-        payload = {
-            content = mention ~= "" and mention or nil,
-            embeds = {{
-                title = "🎯 Rift Teleportation",
-                description = message,
-                color = 5763719, -- Green color
-                timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
-            }}
-        }
+        message = "🎯 " .. message,
+        isPlainText = true,
+        shouldPing = actualShouldPing or false
     })
     
     processWebhookQueue()
