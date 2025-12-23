@@ -1,5 +1,5 @@
 -- BUBBLEGUM SIMULATOR - AUTO HATCH & SECRET NOTIFIER
--- Version 5.0 - Optimized & Refactored
+-- Version 5.0 - Optimized & Refactored (GUI Reorganized)
 
 -- Constants & Config
 local Config = {
@@ -1755,7 +1755,8 @@ startEggCountMonitoring()
 local g = Instance.new("ScreenGui")
 g.Name = "BubblegumAutoHatch"
 g.ResetOnSpawn = false
-g.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+g.ZIndexBehavior = Enum.ZIndexBehavior.Global
+g.DisplayOrder = 100
 g.Parent = p.PlayerGui
 
 -- Main frame (slightly wider for tab system, compact height)
@@ -2041,19 +2042,23 @@ hideXBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 hideXBtn.TextSize = 18
 hideXBtn.Font = Enum.Font.GothamBold
 hideXBtn.BorderSizePixel = 0
-hideXBtn.ZIndex = 2
+hideXBtn.ZIndex = 10
+hideXBtn.Active = true
 hideXBtn.Parent = f
 
 -- Toggle button (top right of screen - always visible)
 local toggleBtn = Instance.new("TextButton")
 toggleBtn.Size = UDim2.new(0, 50, 0, 50)
 toggleBtn.Position = UDim2.new(1, -60, 0, 10)
+toggleBtn.AnchorPoint = Vector2.new(1, 0)
 toggleBtn.BackgroundColor3 = Color3.fromRGB(60, 120, 200)
 toggleBtn.Text = "GUI"
 toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 toggleBtn.TextSize = 12
 toggleBtn.Font = Enum.Font.GothamBold
 toggleBtn.BorderSizePixel = 0
+toggleBtn.ZIndex = 100
+toggleBtn.Active = true
 toggleBtn.Parent = g
 
 -- Add rounded corners to toggle button
@@ -2202,6 +2207,18 @@ closeScriptDesc.TextXAlignment = Enum.TextXAlignment.Center
 closeScriptDesc.TextYAlignment = Enum.TextYAlignment.Top
 closeScriptDesc.TextWrapped = true
 closeScriptDesc.Parent = extraContent
+
+-- Version label (bottom of extra tab)
+local versionLabel = Instance.new("TextLabel")
+versionLabel.Size = UDim2.new(0, 330, 0, 16)
+versionLabel.Position = UDim2.new(0, 15, 1, -18)
+versionLabel.BackgroundTransparency = 1
+versionLabel.Text = "Version 5.0"
+versionLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+versionLabel.TextSize = 10
+versionLabel.Font = Enum.Font.Gotham
+versionLabel.TextXAlignment = Enum.TextXAlignment.Left
+versionLabel.Parent = extraContent
 
 -- Confirmation dialog
 local confirmFrame = Instance.new("Frame")
@@ -2708,7 +2725,7 @@ adminAbuseToggleBtn.Activated:Connect(function()
     end
 end)
 
-adminAbuseYesBtn.Activated:Connect(function()
+adminAbuseYesBtn.MouseButton1Click:Connect(function()
     if not scriptActive then return end
     -- Turn OFF admin abuse mode and send summary
     adminAbuseActive = false
@@ -2722,13 +2739,13 @@ adminAbuseYesBtn.Activated:Connect(function()
     print(">>> ADMIN ABUSE MODE DEACTIVATED <<<")
 end)
 
-adminAbuseNoBtn.Activated:Connect(function()
+adminAbuseNoBtn.MouseButton1Click:Connect(function()
     if not scriptActive then return end
     adminAbuseConfirmFrame.Visible = false
 end)
 
 -- Close Script button - opens confirmation dialog
-closeScriptBtn.Activated:Connect(function()
+closeScriptBtn.MouseButton1Click:Connect(function()
     if not scriptActive then return end
     confirmFrame.Visible = true
 end)
@@ -2870,7 +2887,7 @@ legendaryBtn.Activated:Connect(function()
 end)
 
 -- Hide X button - hides main GUI
-hideXBtn.Activated:Connect(function()
+hideXBtn.MouseButton1Click:Connect(function()
     if not scriptActive then return end
     f.Visible = false
     toggleBtn.Text = ">>>"
@@ -2878,7 +2895,7 @@ hideXBtn.Activated:Connect(function()
 end)
 
 -- Toggle button - shows/hides main GUI
-toggleBtn.Activated:Connect(function()
+toggleBtn.MouseButton1Click:Connect(function()
     if not scriptActive then return end
     f.Visible = not f.Visible
     if f.Visible then
@@ -2907,7 +2924,7 @@ userIDInput.FocusLost:Connect(function(enterPressed)
 end)
 
 -- Yes button - closes everything
-yesBtn.Activated:Connect(function()
+yesBtn.MouseButton1Click:Connect(function()
     if not scriptActive then return end
     print("Closing script...")
     
@@ -2941,7 +2958,7 @@ yesBtn.Activated:Connect(function()
 end)
 
 -- No button - closes confirmation dialog
-noBtn.Activated:Connect(function()
+noBtn.MouseButton1Click:Connect(function()
     if not scriptActive then return end
     confirmFrame.Visible = false
 end)
