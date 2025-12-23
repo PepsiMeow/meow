@@ -81,6 +81,7 @@ local riftSelections = {
 }
 local allEggRiftsEnabled = false
 local isAtRift = false
+local returningFromRift = false -- Guard flag to prevent multiple return calls
 local storedPosition = nil
 local currentRift = nil
 local riftStartTime = nil
@@ -140,7 +141,7 @@ local function loadSettings()
                     if decoded.xlPingEnabled ~= nil then xlPingEnabled = decoded.xlPingEnabled end
                     if decoded.legendaryDetectionEnabled ~= nil then legendaryDetectionEnabled = decoded.legendaryDetectionEnabled end
                     if decoded.legendaryPingEnabled ~= nil then legendaryPingEnabled = decoded.legendaryPingEnabled end
-                    if decoded.riftDetectionEnabled ~= nil then riftDetectionEnabled = decoded.riftDetectionEnabled end
+                    -- riftDetectionEnabled is NOT loaded - always defaults to false
                     if decoded.riftPingEnabled ~= nil then riftPingEnabled = decoded.riftPingEnabled end
                     if decoded.allEggRiftsEnabled ~= nil then allEggRiftsEnabled = decoded.allEggRiftsEnabled end
                     if decoded.riftSelections and type(decoded.riftSelections) == "table" then
@@ -188,7 +189,8 @@ local function saveSettings()
             infinityNotifyEnabled = infinityNotifyEnabled, infinityPingEnabled = infinityPingEnabled,
             xlDetectionEnabled = xlDetectionEnabled, xlPingEnabled = xlPingEnabled,
             legendaryDetectionEnabled = legendaryDetectionEnabled, legendaryPingEnabled = legendaryPingEnabled,
-            riftDetectionEnabled = riftDetectionEnabled, riftPingEnabled = riftPingEnabled,
+            -- riftDetectionEnabled is NOT saved - always defaults to false on script start
+            riftPingEnabled = riftPingEnabled,
             allEggRiftsEnabled = allEggRiftsEnabled, riftSelections = riftSelections,
             adminAbuseSecretSettings = adminAbuseSecretSettings
         }
@@ -839,13 +841,16 @@ local function sendRiftWebhook(message, shouldPing)
     local mention = (shouldPing and riftPingEnabled and discordUserID ~= "") and ("<@" .. discordUserID .. ">") or ""
     
     table.insert(webhookQueue, {
-        content = mention ~= "" and mention or nil,
-        embeds = {{
-            title = "🎯 Rift Teleportation",
-            description = message,
-            color = 5763719, -- Green color
-            timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
-        }}
+        isCustomEmbed = true,
+        payload = {
+            content = mention ~= "" and mention or nil,
+            embeds = {{
+                title = "🎯 Rift Teleportation",
+                description = message,
+                color = 5763719, -- Green color
+                timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+            }}
+        }
     })
     
     processWebhookQueue()
@@ -853,25 +858,31 @@ end
 
 -- Return to stored position
 local function returnToStoredPosition()
-    if not storedPosition then return end
+    if not storedPosition or returningFromRift then return end
     
+    returningFromRift = true -- Set flag to prevent multiple calls
     addRiftStatusLog("🔙 Returning to previous position...")
     
-    if teleportToPosition(storedPosition) then
+    local teleportSuccess = teleportToPosition(storedPosition)
+    
+    if teleportSuccess then
         addRiftStatusLog("✓ Returned to previous location")
         
         -- Send webhook notification (no ping)
         local playerName = p.Name or "Unknown Player"
         sendRiftWebhook(playerName .. " has successfully teleported back from the rift.", false)
-        
-        -- Reset state
-        isAtRift = false
-        currentRift = nil
-        riftStartTime = nil
-        storedPosition = nil
-        riftDuration = 0
-        luckMultiplier = nil
     end
+    
+    -- Always reset state regardless of teleport success/failure
+    -- This ensures player can teleport to new rifts even if return teleport fails
+    isAtRift = false
+    currentRift = nil
+    riftStartTime = nil
+    storedPosition = nil
+    riftDuration = 0
+    luckMultiplier = nil
+    
+    returningFromRift = false -- Clear flag
 end
 
 -- Handle rift spawn
