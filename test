@@ -756,25 +756,51 @@ local function getRiftPosition(rift)
     
     pcall(function()
         -- For chest rifts: Find Chest object
-        if rift:FindFirstChild("Chest") then
-            local chest = rift.Chest
-            if chest:FindFirstChild("Prompt") then
-                local prompt = chest.Prompt
-                if prompt.Parent and prompt.Parent:IsA("BasePart") then
-                    riftPos = prompt.Parent.Position
-                end
-            end
-            if not riftPos and chest:IsA("BasePart") then
+        local chest = rift:FindFirstChild("Chest")
+        if chest then
+            -- Try to find a BasePart within the Chest (could be the chest model's primary part)
+            if chest:IsA("BasePart") then
                 riftPos = chest.Position
+            elseif chest:IsA("Model") then
+                -- Look for Prompt first (common in chest rifts)
+                local prompt = chest:FindFirstChild("Prompt")
+                if prompt and prompt.Parent and prompt.Parent:IsA("BasePart") then
+                    riftPos = prompt.Parent.Position
+                elseif chest.PrimaryPart then
+                    riftPos = chest.PrimaryPart.Position
+                else
+                    -- Try GetPivot as fallback
+                    local success, pivotPos = pcall(function()
+                        return chest:GetPivot().Position
+                    end)
+                    if success then
+                        riftPos = pivotPos
+                    end
+                end
+                
+                -- If still no position, search for any BasePart in the Chest model
+                if not riftPos then
+                    for _, child in ipairs(chest:GetDescendants()) do
+                        if child:IsA("BasePart") and child.Name ~= "Handle" then
+                            riftPos = child.Position
+                            break
+                        end
+                    end
+                end
             end
         end
         
-        -- For egg rifts: Use PivotPosition or PrimaryPart
+        -- For egg rifts: Use PivotPosition or PrimaryPart (if not a chest rift)
         if not riftPos and rift:IsA("Model") then
             if rift.PrimaryPart then
                 riftPos = rift.PrimaryPart.Position
             else
-                riftPos = rift:GetPivot().Position
+                local success, pivotPos = pcall(function()
+                    return rift:GetPivot().Position
+                end)
+                if success then
+                    riftPos = pivotPos
+                end
             end
         end
         
@@ -917,6 +943,7 @@ local function handleRiftSpawn(rift)
         local searchName = string.lower(riftInfo.name)
         local searchDisplay = string.lower(riftInfo.displayName)
         
+        -- Try exact matches first
         if string.find(riftName, searchName) or 
            string.find(riftName, searchDisplay) or
            string.find(searchName, riftName) or
@@ -927,7 +954,25 @@ local function handleRiftSpawn(rift)
                 displayName = riftInfo.displayName
                 matchedRiftInfo = riftInfo
             end
-            break
+            -- Don't break here - continue to check other rifts
+        end
+        
+        -- Also try simplified matching (remove spaces/dashes) for better compatibility
+        local simplifiedRiftName = riftName:gsub("%s+", ""):gsub("%-", "")
+        local simplifiedSearchName = searchName:gsub("%s+", ""):gsub("%-", "")
+        local simplifiedSearchDisplay = searchDisplay:gsub("%s+", ""):gsub("%-", "")
+        
+        if not isSelected and (string.find(simplifiedRiftName, simplifiedSearchName, 1, true) or
+           string.find(simplifiedRiftName, simplifiedSearchDisplay, 1, true) or
+           string.find(simplifiedSearchName, simplifiedRiftName, 1, true) or
+           string.find(simplifiedSearchDisplay, simplifiedRiftName, 1, true)) then
+            
+            if riftSelections[riftInfo.name] then
+                isSelected = true
+                displayName = riftInfo.displayName
+                matchedRiftInfo = riftInfo
+            end
+            -- Don't break here - continue to check other rifts
         end
     end
 
@@ -957,16 +1002,17 @@ local function handleRiftSpawn(rift)
     -- Get rift position
     local riftPos = getRiftPosition(rift)
     if not riftPos then
-        local errorRiftName = rift.Name
+        local errorRiftName = displayName
         pcall(function()
+            -- Only try to format with multiplier if it's an egg rift
             if matchedRiftInfo and matchedRiftInfo.type == "Egg" then
                 local multiplier = getRiftBonusLuck(rift)
                 if multiplier then
-                    errorRiftName = formatEggNameWithMultiplier(rift.Name, multiplier)
+                    errorRiftName = formatEggNameWithMultiplier(displayName, multiplier)
                 end
             end
         end)
-        addRiftStatusLog("✗ Could not determine position for: " .. errorRiftName)
+        addRiftStatusLog("✗ Could not determine position for: " .. errorRiftName .. " (Type: " .. tostring(matchedRiftInfo and matchedRiftInfo.type or "Unknown") .. ")")
         return
     end
     
@@ -979,16 +1025,18 @@ local function handleRiftSpawn(rift)
         return
     end
     
-    -- Get duration and multiplier
+    -- Get duration (always needed) and multiplier (only for egg rifts)
+    luckMultiplier = nil  -- Clear multiplier first, only set for eggs
     pcall(function()
         local despawnAt = rift:GetAttribute("DespawnAt")
         if despawnAt then
             local serverTime = workspace:GetServerTimeNow()
             riftDuration = math.max(0, despawnAt - serverTime)
         else
-            riftDuration = 600
+            riftDuration = 600  -- Default 10 minutes if DespawnAt not found
         end
         
+        -- Only get multiplier for egg rifts (chest rifts don't have multipliers)
         if matchedRiftInfo and matchedRiftInfo.type == "Egg" then
             luckMultiplier = getRiftBonusLuck(rift)
         end
@@ -1034,9 +1082,9 @@ local function handleRiftSpawn(rift)
             processWebhookQueue()
         end
         
-        -- Monitor duration
+        -- Monitor duration (wait for displayed duration to ensure full use + buffer)
         spawn(function()
-            task.wait(riftDuration)
+            task.wait(riftDuration + 1)  -- Wait for actual duration + 1 second buffer
             
             if isAtRift and currentRift == rift then
                 addRiftStatusLog("⏰ Rift duration expired")
@@ -1068,8 +1116,14 @@ local function setupRiftMonitoring()
         
         -- Monitor for new rifts only
         folder.ChildAdded:Connect(function(rift)
+            -- Wait a moment for the rift to fully load its properties
             task.wait(0.5)
-            handleRiftSpawn(rift)
+            -- Verify rift still exists before processing (handles edge case where rift despawns quickly)
+            if rift.Parent then
+                pcall(function()
+                    handleRiftSpawn(rift)
+                end)
+            end
         end)
     end
     
