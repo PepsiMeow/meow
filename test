@@ -11,7 +11,7 @@ local Config = {
     },
     RIFT_HEIGHT_OFFSET = 15,
     RIFTS = {
-        {name = "2026-egg", displayName = "2026 Egg Rift", type = "Egg"},
+        {name = "2026-egg", displayName = "2026 Egg Rift", type = "Egg", altNames = {"new-year-egg", "new-years-egg", "2026-new-year-egg", "2026-new-nears-egg"}},
         {name = "peppermint-chest", displayName = "Peppermint Chest", type = "Chest"}
     },
     EVENT_EGGS = {
@@ -863,29 +863,33 @@ local function returnToStoredPosition()
         return 
     end
     
-    -- Reset state FIRST before doing anything else
-    -- This ensures player is immediately available for new rifts
+    -- Save the position we're returning to BEFORE resetting state
+    -- This allows new rifts that spawn during return to use this position
+    local savedStoredPosition = storedPosition
     local previousRift = currentRift
+    
+    -- Reset state FIRST before doing anything else (except storedPosition - keep it for now)
+    -- This ensures player is immediately available for new rifts
     isAtRift = false
     currentRift = nil
     riftStartTime = nil
-    local savedStoredPosition = storedPosition
-    storedPosition = nil
     riftDuration = 0
     luckMultiplier = nil
     
     -- Clear the previous rift from knownRifts so we can process it again if it respawns
-    -- (Rifts are unique objects, so we're just cleaning up the reference)
     if previousRift then
         knownRifts[previousRift] = nil
     end
     
     -- Check if we have a stored position to return to
     if not savedStoredPosition then
+        storedPosition = nil  -- Clear it now if we don't have one
         returningFromRift = false
         return
     end
     
+    -- Keep storedPosition set while returning (in case new rift spawns during return)
+    -- It will be cleared/updated when we successfully return or when a new rift spawns
     returningFromRift = true -- Set flag to prevent multiple calls
     addRiftStatusLog("🔙 Returning to previous position...")
     
@@ -907,6 +911,13 @@ local function returnToStoredPosition()
             -- Ensure queue processing starts
             processWebhookQueue()
         end
+    end
+    
+    -- Only clear storedPosition after teleport completes (unless a new rift has already claimed it)
+    -- If a new rift spawned during return and we set returningFromRift = false, storedPosition is still valid
+    -- If storedPosition still matches what we were returning to AND returningFromRift is still true (no new rift), clear it
+    if storedPosition == savedStoredPosition and returningFromRift then
+        storedPosition = nil
     end
     
     returningFromRift = false -- Clear flag
@@ -943,12 +954,25 @@ local function handleRiftSpawn(rift)
         local searchName = string.lower(riftInfo.name)
         local searchDisplay = string.lower(riftInfo.displayName)
         
-        -- Try exact matches first
-        if string.find(riftName, searchName) or 
-           string.find(riftName, searchDisplay) or
-           string.find(searchName, riftName) or
-           string.find(searchDisplay, riftName) then
-            
+        -- Check main name and display name
+        local nameMatches = string.find(riftName, searchName) or 
+                           string.find(riftName, searchDisplay) or
+                           string.find(searchName, riftName) or
+                           string.find(searchDisplay, riftName)
+        
+        -- Check alternative names if they exist (e.g., for 2026 egg variations)
+        if not nameMatches and riftInfo.altNames then
+            for _, altName in ipairs(riftInfo.altNames) do
+                local altSearchName = string.lower(altName)
+                if string.find(riftName, altSearchName) or
+                   string.find(altSearchName, riftName) then
+                    nameMatches = true
+                    break
+                end
+            end
+        end
+        
+        if nameMatches then
             if riftSelections[riftInfo.name] then
                 isSelected = true
                 displayName = riftInfo.displayName
@@ -962,11 +986,24 @@ local function handleRiftSpawn(rift)
         local simplifiedSearchName = searchName:gsub("%s+", ""):gsub("%-", "")
         local simplifiedSearchDisplay = searchDisplay:gsub("%s+", ""):gsub("%-", "")
         
-        if not isSelected and (string.find(simplifiedRiftName, simplifiedSearchName, 1, true) or
+        local simplifiedMatches = string.find(simplifiedRiftName, simplifiedSearchName, 1, true) or
            string.find(simplifiedRiftName, simplifiedSearchDisplay, 1, true) or
            string.find(simplifiedSearchName, simplifiedRiftName, 1, true) or
-           string.find(simplifiedSearchDisplay, simplifiedRiftName, 1, true)) then
-            
+           string.find(simplifiedSearchDisplay, simplifiedRiftName, 1, true)
+        
+        -- Check simplified alternative names
+        if not simplifiedMatches and riftInfo.altNames then
+            for _, altName in ipairs(riftInfo.altNames) do
+                local simplifiedAltName = string.lower(altName):gsub("%s+", ""):gsub("%-", "")
+                if string.find(simplifiedRiftName, simplifiedAltName, 1, true) or
+                   string.find(simplifiedAltName, simplifiedRiftName, 1, true) then
+                    simplifiedMatches = true
+                    break
+                end
+            end
+        end
+        
+        if not isSelected and simplifiedMatches then
             if riftSelections[riftInfo.name] then
                 isSelected = true
                 displayName = riftInfo.displayName
@@ -1017,23 +1054,28 @@ local function handleRiftSpawn(rift)
     end
     
     -- Store current position
-    local char = p.Character
-    if char and char:FindFirstChild("HumanoidRootPart") then
-        storedPosition = char.HumanoidRootPart.Position
-    else
-        addRiftStatusLog("✗ Could not store current position")
-        return
+    -- If we're currently returning from a rift, preserve the stored position (where we're returning to)
+    -- Otherwise, store the player's current position
+    if not (returningFromRift and storedPosition) then
+        local char = p.Character
+        if char and char:FindFirstChild("HumanoidRootPart") then
+            storedPosition = char.HumanoidRootPart.Position
+        else
+            addRiftStatusLog("✗ Could not store current position")
+            return
+        end
     end
+    -- If returningFromRift is true and storedPosition exists, we preserve it (don't overwrite)
+    -- This ensures: rift1 -> return to A -> rift2 spawns -> keep A stored -> rift2 -> return to A
     
     -- Get duration (always needed) and multiplier (only for egg rifts)
     luckMultiplier = nil  -- Clear multiplier first, only set for eggs
+    local capturedRiftDuration = 600  -- Default 10 minutes, will be updated below
     pcall(function()
         local despawnAt = rift:GetAttribute("DespawnAt")
         if despawnAt then
             local serverTime = workspace:GetServerTimeNow()
-            riftDuration = math.max(0, despawnAt - serverTime)
-        else
-            riftDuration = 600  -- Default 10 minutes if DespawnAt not found
+            capturedRiftDuration = math.max(0, despawnAt - serverTime)
         end
         
         -- Only get multiplier for egg rifts (chest rifts don't have multipliers)
@@ -1042,13 +1084,16 @@ local function handleRiftSpawn(rift)
         end
     end)
     
+    -- Store duration in module variable for display purposes
+    riftDuration = capturedRiftDuration
+    
     -- Format display name with multiplier
     local displayNameWithMultiplier = displayName
     if matchedRiftInfo and matchedRiftInfo.type == "Egg" and luckMultiplier then
         displayNameWithMultiplier = formatEggNameWithMultiplier(displayName, luckMultiplier)
     end
     
-    local displayedDuration = riftDuration + 1
+    local displayedDuration = capturedRiftDuration + 1
     addRiftStatusLog("🎯 Rift detected: " .. displayNameWithMultiplier)
     addRiftStatusLog("   Duration: " .. math.floor(displayedDuration / 60) .. "m " .. math.floor(displayedDuration % 60) .. "s")
     
@@ -1060,6 +1105,10 @@ local function handleRiftSpawn(rift)
     isAtRift = true
     riftStartTime = tick()
     
+    -- If we were returning from a previous rift, cancel that return
+    -- The new rift takes priority, and we've already preserved the stored position above
+    returningFromRift = false
+    
     -- Teleport to rift
     local teleportPos = riftPos + Vector3.new(0, Config.RIFT_HEIGHT_OFFSET, 0)
     if teleportToPosition(teleportPos) then
@@ -1069,7 +1118,7 @@ local function handleRiftSpawn(rift)
         if scriptActive and webhookURL and webhookURL ~= "" then
             local playerName = p.Name or "Unknown Player"
             local webhookMessage = playerName .. " teleported to a " .. displayNameWithMultiplier .. " rift"
-            webhookMessage = webhookMessage .. "\n**Duration:** " .. math.floor(riftDuration / 60) .. "m " .. math.floor(riftDuration % 60) .. "s"
+            webhookMessage = webhookMessage .. "\n**Duration:** " .. math.floor(capturedRiftDuration / 60) .. "m " .. math.floor(capturedRiftDuration % 60) .. "s"
             local actualShouldPing = riftPingEnabled -- Only ping if toggle is enabled
             
             table.insert(webhookQueue, {
@@ -1083,9 +1132,12 @@ local function handleRiftSpawn(rift)
         end
         
         -- Monitor duration (wait for displayed duration to ensure full use + buffer)
+        -- Use capturedRiftDuration in closure to avoid race conditions with subsequent rifts
         spawn(function()
-            task.wait(riftDuration + 1)  -- Wait for actual duration + 1 second buffer
+            local waitDuration = capturedRiftDuration + 1  -- Wait for actual duration + 1 second buffer
+            task.wait(waitDuration)
             
+            -- Double-check we're still at this specific rift before returning
             if isAtRift and currentRift == rift then
                 addRiftStatusLog("⏰ Rift duration expired")
                 returnToStoredPosition()
