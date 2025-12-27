@@ -12,7 +12,7 @@ local Config = {
     },
     RIFT_HEIGHT_OFFSET = 15,
     RIFTS = {
-        {name = "2026-egg", displayName = "2026 Egg Rift", type = "Egg", altNames = {"new-year-egg", "new-years-egg", "2026-new-year-egg", "2026-new-nears-egg"}},
+        {name = "2026-egg", displayName = "2026 Egg Rift", type = "Egg", altNames = {"new-year-egg", "new-years-egg", "2026-new-year-egg", "2026-new-nears-egg", "new-egg", "2026-new-egg", "new-2026-egg"}},
         {name = "peppermint-chest", displayName = "Peppermint Chest", type = "Chest"}
     },
     EVENT_EGGS = {
