@@ -7,7 +7,8 @@ local Config = {
     SETTINGS_FILE = "bubblegum_settings.json",
     SPECIAL_PETS = {
         "Morning Star", "Christmas Robot", "Rumblecon God",
-        "The Leviathan", "Sylently's Pet", "Giant Nert's Pufferfish"
+        "The Leviathan", "Sylently's Pet", "Giant Nert's Pufferfish",
+        "Painted Daze"
     },
     RIFT_HEIGHT_OFFSET = 15,
     RIFTS = {
@@ -2801,7 +2802,7 @@ local versionLabel = Instance.new("TextLabel")
 versionLabel.Size = UDim2.new(0, 330, 0, 16)
 versionLabel.Position = UDim2.new(0, 15, 1, -18)
 versionLabel.BackgroundTransparency = 1
-versionLabel.Text = "v7"
+versionLabel.Text = "v8"
 versionLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
 versionLabel.TextSize = 10
 versionLabel.Font = Enum.Font.Gotham
