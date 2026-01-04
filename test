@@ -8,7 +8,7 @@ local Config = {
     SPECIAL_PETS = {
         "Morning Star", "Christmas Robot", "Rumblecon God",
         "The Leviathan", "Sylently's Pet", "Giant Nert's Pufferfish",
-        "Painted Daze"
+        "Painted Daze", "Festive Basket", "Aurora Guardian", "Starglitcher"
     },
     RIFT_HEIGHT_OFFSET = 15,
     RIFTS = {
