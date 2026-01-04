@@ -3278,20 +3278,23 @@ autoHatchBtn.Activated:Connect(function()
     end
 end)
 
--- Hatch Speed toggle (cycles through 0.4s, 0.25s, 0.1s)
+-- Hatch Speed toggle (cycles through 0.4s, 0.25s, 0.1s, 0.06s)
 hatchSpeedBtn.Activated:Connect(function()
     if not scriptActive then
         return
     end
     
-    -- Cycle through speeds: 0.4 -> 0.25 -> 0.1 -> 0.4
+    -- Cycle through speeds: 0.4 -> 0.25 -> 0.1 -> 0.06 -> 0.4
     if hatchSpeed == 0.4 then
         hatchSpeed = 0.25
         hatchSpeedBtn.Text = "0.25s"
     elseif hatchSpeed == 0.25 then
         hatchSpeed = 0.1
         hatchSpeedBtn.Text = "0.1s"
-    else -- hatchSpeed == 0.1
+    elseif hatchSpeed == 0.1 then
+        hatchSpeed = 0.06
+        hatchSpeedBtn.Text = "0.06s"
+    else -- hatchSpeed == 0.06
         hatchSpeed = 0.4
         hatchSpeedBtn.Text = "0.4s"
     end
