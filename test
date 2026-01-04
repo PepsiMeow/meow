@@ -50,6 +50,7 @@ local Remote, ItemUtil, PetsData, PetUtil, FormatCommas, LocalData
 
 -- Settings
 local autoHatchEnabled = false
+local hatchSpeed = 0.4 -- Default hatch speed (0.4s, 0.25s, or 0.1s)
 local webhookURL = ""
 local discordUserID = ""
 local playerTrackingEnabled = true
@@ -2556,9 +2557,9 @@ title.Font = Enum.Font.GothamBold
 title.BorderSizePixel = 0
 title.Parent = hatchingContent
 
--- Auto Hatch button
+-- Auto Hatch button (shrunk to make room for speed toggle)
 local autoHatchBtn = Instance.new("TextButton")
-autoHatchBtn.Size = UDim2.new(0, 330, 0, 45)
+autoHatchBtn.Size = UDim2.new(0, 240, 0, 45)
 autoHatchBtn.Position = UDim2.new(0, 15, 0, 55)
 autoHatchBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
 autoHatchBtn.Text = "Auto Hatch: OFF"
@@ -2567,6 +2568,18 @@ autoHatchBtn.TextSize = 14
 autoHatchBtn.Font = Enum.Font.GothamBold
 autoHatchBtn.BorderSizePixel = 0
 autoHatchBtn.Parent = hatchingContent
+
+-- Hatch Speed toggle button (next to auto hatch button)
+local hatchSpeedBtn = Instance.new("TextButton")
+hatchSpeedBtn.Size = UDim2.new(0, 80, 0, 45)
+hatchSpeedBtn.Position = UDim2.new(0, 265, 0, 55)
+hatchSpeedBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+hatchSpeedBtn.Text = "0.4s"
+hatchSpeedBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+hatchSpeedBtn.TextSize = 12
+hatchSpeedBtn.Font = Enum.Font.GothamBold
+hatchSpeedBtn.BorderSizePixel = 0
+hatchSpeedBtn.Parent = hatchingContent
 
 -- Webhook URL label
 local webhookLabel = Instance.new("TextLabel")
@@ -3250,18 +3263,37 @@ autoHatchBtn.Activated:Connect(function()
         autoHatchBtn.Text = "Auto Hatch: ON"
         autoHatchBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
         
-        -- Start E key spam (0.4s intervals)
+        -- Start E key spam (uses hatchSpeed variable)
         spawn(function()
             while autoHatchEnabled and scriptActive do
                 VIM:SendKeyEvent(true, Enum.KeyCode.E, false, game)
                 task.wait(0.05)
                 VIM:SendKeyEvent(false, Enum.KeyCode.E, false, game)
-                task.wait(0.35) -- 0.05 + 0.35 = 0.4s total
+                task.wait(hatchSpeed - 0.05) -- Total interval = hatchSpeed
             end
         end)
     else
         autoHatchBtn.Text = "Auto Hatch: OFF"
         autoHatchBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    end
+end)
+
+-- Hatch Speed toggle (cycles through 0.4s, 0.25s, 0.1s)
+hatchSpeedBtn.Activated:Connect(function()
+    if not scriptActive then
+        return
+    end
+    
+    -- Cycle through speeds: 0.4 -> 0.25 -> 0.1 -> 0.4
+    if hatchSpeed == 0.4 then
+        hatchSpeed = 0.25
+        hatchSpeedBtn.Text = "0.25s"
+    elseif hatchSpeed == 0.25 then
+        hatchSpeed = 0.1
+        hatchSpeedBtn.Text = "0.1s"
+    else -- hatchSpeed == 0.1
+        hatchSpeed = 0.4
+        hatchSpeedBtn.Text = "0.4s"
     end
 end)
 
