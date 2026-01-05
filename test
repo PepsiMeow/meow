@@ -50,7 +50,7 @@ local Remote, ItemUtil, PetsData, PetUtil, FormatCommas, LocalData
 
 -- Settings
 local autoHatchEnabled = false
-local hatchSpeed = 0.4 -- Default hatch speed (0.4s, 0.25s, or 0.1s)
+local hatchSpeed = 0.4 -- Default hatch speed (0.4s, 0.25s, 0.1s, 0.06s, 0.03s, or 0.02s)
 local webhookURL = ""
 local discordUserID = ""
 local playerTrackingEnabled = true
@@ -693,9 +693,9 @@ local function sendPetNotificationWebhook(petName, shiny, mythic, xl, eggName, r
         return false -- Retry on rate limit
     else
         return true -- Don't retry other errors
+        end
     end
-end
-
+    
 -- Legacy function wrappers for backward compatibility
 local function sendSpecialDiscordNotificationInternal(petName, shiny, mythic, xl, eggName, rarity, pet, petImageUrl, isInfinity, shouldPing)
     return sendPetNotificationWebhook(petName, shiny, mythic, xl, eggName, rarity, pet, petImageUrl, "infinity", shouldPing)
@@ -862,7 +862,7 @@ end
 local function returnToStoredPosition()
     -- Prevent multiple calls
     if returningFromRift then 
-        return 
+        return
     end
     
     -- Save the position we're returning to BEFORE resetting state
@@ -971,9 +971,9 @@ local function handleRiftSpawn(rift)
                     nameMatches = true
                     break
                 end
-            end
         end
-        
+    end
+    
         if nameMatches then
             if riftSelections[riftInfo.name] then
                 isSelected = true
@@ -1065,8 +1065,8 @@ local function handleRiftSpawn(rift)
         else
             addRiftStatusLog("✗ Could not store current position")
             return
-        end
     end
+end
     -- If returningFromRift is true and storedPosition exists, we preserve it (don't overwrite)
     -- This ensures: rift1 -> return to A -> rift2 spawns -> keep A stored -> rift2 -> return to A
     
@@ -1118,7 +1118,7 @@ local function handleRiftSpawn(rift)
         
         -- Send webhook notification
         if scriptActive and webhookURL and webhookURL ~= "" then
-            local playerName = p.Name or "Unknown Player"
+    local playerName = p.Name or "Unknown Player"
             local webhookMessage = playerName .. " teleported to a " .. displayNameWithMultiplier .. " rift"
             webhookMessage = webhookMessage .. "\n**Duration:** " .. math.floor(capturedRiftDuration / 60) .. "m " .. math.floor(capturedRiftDuration % 60) .. "s"
             local actualShouldPing = riftPingEnabled -- Only ping if toggle is enabled
@@ -1150,9 +1150,9 @@ local function handleRiftSpawn(rift)
         isAtRift = false
         currentRift = nil
         storedPosition = nil
+        end
     end
-end
-
+    
 -- Setup rift monitoring
 local function setupRiftMonitoring()
     local monitoredFolders = {}
@@ -3284,7 +3284,7 @@ hatchSpeedBtn.Activated:Connect(function()
         return
     end
     
-    -- Cycle through speeds: 0.4 -> 0.25 -> 0.1 -> 0.06 -> 0.4
+    -- Cycle through speeds: 0.4 -> 0.25 -> 0.1 -> 0.06 -> 0.03 -> 0.02 -> 0.4
     if hatchSpeed == 0.4 then
         hatchSpeed = 0.25
         hatchSpeedBtn.Text = "0.25s"
@@ -3294,7 +3294,13 @@ hatchSpeedBtn.Activated:Connect(function()
     elseif hatchSpeed == 0.1 then
         hatchSpeed = 0.06
         hatchSpeedBtn.Text = "0.06s"
-    else -- hatchSpeed == 0.06
+    elseif hatchSpeed == 0.06 then
+        hatchSpeed = 0.03
+        hatchSpeedBtn.Text = "0.03s"
+    elseif hatchSpeed == 0.03 then
+        hatchSpeed = 0.02
+        hatchSpeedBtn.Text = "0.02s"
+    else -- hatchSpeed == 0.02
         hatchSpeed = 0.4
         hatchSpeedBtn.Text = "0.4s"
     end
