@@ -3265,6 +3265,7 @@ local function createSecretSettingsMenu(parentFrame, isAdminAbuse)
     backBtn.Font = Enum.Font.GothamBold
     backBtn.BorderSizePixel = 0
     backBtn.ZIndex = 8
+    backBtn.Active = true
     backBtn.Parent = bg
     
     -- Section labels
@@ -3318,6 +3319,7 @@ local function createSecretSettingsMenu(parentFrame, isAdminAbuse)
         notifyBtn.Font = Enum.Font.GothamBold
         notifyBtn.BorderSizePixel = 0
         notifyBtn.ZIndex = 7
+        notifyBtn.Active = true
         notifyBtn.Parent = bg
         buttons["notify" .. row.key] = notifyBtn
         
@@ -3332,6 +3334,7 @@ local function createSecretSettingsMenu(parentFrame, isAdminAbuse)
         pingBtn.Font = Enum.Font.GothamBold
         pingBtn.BorderSizePixel = 0
         pingBtn.ZIndex = 7
+        pingBtn.Active = true
         pingBtn.Parent = bg
         buttons["ping" .. row.key] = pingBtn
     end
@@ -3347,6 +3350,7 @@ local function createSecretSettingsMenu(parentFrame, isAdminAbuse)
     filterBtn.Font = Enum.Font.GothamBold
     filterBtn.BorderSizePixel = 0
     filterBtn.ZIndex = 7
+    filterBtn.Active = true
     filterBtn.Parent = bg
     buttons["filter"] = filterBtn
     
