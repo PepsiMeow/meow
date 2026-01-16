@@ -51,7 +51,7 @@ local Remote, ItemUtil, PetsData, PetUtil, FormatCommas, LocalData
 
 -- Settings
 local autoHatchEnabled = false
-local hatchSpeed = 0.4 -- Default hatch speed (0.4s, 0.25s, 0.1s, 0.06s, 0.03s, or 0.02s)
+local hatchSpeed = 0.2 -- Default hatch speed (0.2s, 0.1s, or 0.01s)
 local webhookURL = ""
 local discordUserID = ""
 local playerTrackingEnabled = true
@@ -2701,7 +2701,7 @@ local hatchSpeedBtn = Instance.new("TextButton")
 hatchSpeedBtn.Size = UDim2.new(0, 80, 0, 45)
 hatchSpeedBtn.Position = UDim2.new(0, 265, 0, 55)
 hatchSpeedBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-hatchSpeedBtn.Text = "0.4s"
+hatchSpeedBtn.Text = "0.2s"
 hatchSpeedBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 hatchSpeedBtn.TextSize = 12
 hatchSpeedBtn.Font = Enum.Font.GothamBold
@@ -3409,31 +3409,22 @@ autoHatchBtn.Activated:Connect(function()
     end
 end)
 
--- Hatch Speed toggle (cycles through 0.4s, 0.25s, 0.1s, 0.06s)
+-- Hatch Speed toggle (cycles through 0.2s, 0.1s, 0.01s)
 hatchSpeedBtn.Activated:Connect(function()
     if not scriptActive then
         return
     end
     
-    -- Cycle through speeds: 0.4 -> 0.25 -> 0.1 -> 0.06 -> 0.03 -> 0.02 -> 0.4
-    if hatchSpeed == 0.4 then
-        hatchSpeed = 0.25
-        hatchSpeedBtn.Text = "0.25s"
-    elseif hatchSpeed == 0.25 then
+    -- Cycle through speeds: 0.2 -> 0.1 -> 0.01 -> 0.2
+    if hatchSpeed == 0.2 then
         hatchSpeed = 0.1
         hatchSpeedBtn.Text = "0.1s"
     elseif hatchSpeed == 0.1 then
-        hatchSpeed = 0.06
-        hatchSpeedBtn.Text = "0.06s"
-    elseif hatchSpeed == 0.06 then
-        hatchSpeed = 0.03
-        hatchSpeedBtn.Text = "0.03s"
-    elseif hatchSpeed == 0.03 then
-        hatchSpeed = 0.02
-        hatchSpeedBtn.Text = "0.02s"
-    else -- hatchSpeed == 0.02
-        hatchSpeed = 0.4
-        hatchSpeedBtn.Text = "0.4s"
+        hatchSpeed = 0.01
+        hatchSpeedBtn.Text = "0.01s"
+    else -- hatchSpeed == 0.01
+        hatchSpeed = 0.2
+        hatchSpeedBtn.Text = "0.2s"
     end
 end)
 
