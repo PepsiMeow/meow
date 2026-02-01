@@ -9,7 +9,7 @@ local Config = {
         "Morning Star", "Christmas Robot", "Rumblecon God",
         "The Leviathan", "Sylently's Pet", "Giant Nert's Pufferfish",
         "Painted Daze", "Festive Basket", "Aurora Guardian", "Starglitcher",
-        "Bubble Circus Show", "Symphonic Hieromphant", "Circus Monster"
+        "Bubble Circus Show", "Symphonic Hieromphant", "Circus Monster", "pc-bot"
     },
     RIFT_HEIGHT_OFFSET = 15,
     RIFTS = {
